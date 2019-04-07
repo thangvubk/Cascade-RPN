@@ -83,10 +83,12 @@ class AnchorHead(nn.Module):
         bbox_pred = self.conv_reg(x)
         return cls_score, bbox_pred
 
-    def forward(self, feats):
-        return multi_apply(self.forward_single, feats)
+    def forward(self, feats, offset_list=None):
+        if offset_list is None:
+            offset_list = [None for _ in range(len(feats))]
+        return multi_apply(self.forward_single, feats, offset_list)
 
-    def get_anchors(self, featmap_sizes, img_metas):
+    def init_anchors(self, featmap_sizes, img_metas):
         """Get anchors according to feature map sizes.
 
         Args:
@@ -166,6 +168,8 @@ class AnchorHead(nn.Module):
         return loss_cls, loss_reg
 
     def loss(self,
+             anchor_list,
+             valid_flag_list,
              cls_scores,
              bbox_preds,
              gt_bboxes,
@@ -173,11 +177,6 @@ class AnchorHead(nn.Module):
              img_metas,
              cfg,
              gt_bboxes_ignore=None):
-        featmap_sizes = [featmap.size()[-2:] for featmap in cls_scores]
-        assert len(featmap_sizes) == len(self.anchor_generators)
-
-        anchor_list, valid_flag_list = self.get_anchors(
-            featmap_sizes, img_metas)
         sampling = False if self.use_focal_loss else True
         label_channels = self.cls_out_channels if self.use_sigmoid_cls else 1
         cls_reg_targets = anchor_target(
@@ -210,16 +209,11 @@ class AnchorHead(nn.Module):
             cfg=cfg)
         return dict(loss_cls=losses_cls, loss_reg=losses_reg)
 
-    def get_bboxes(self, cls_scores, bbox_preds, img_metas, cfg,
+    def get_bboxes(self, anchor_list, cls_scores, bbox_preds, img_metas, cfg,
                    rescale=False):
         assert len(cls_scores) == len(bbox_preds)
         num_levels = len(cls_scores)
 
-        mlvl_anchors = [
-            self.anchor_generators[i].grid_anchors(cls_scores[i].size()[-2:],
-                                                   self.anchor_strides[i])
-            for i in range(num_levels)
-        ]
         result_list = []
         for img_id in range(len(img_metas)):
             cls_score_list = [
@@ -231,10 +225,34 @@ class AnchorHead(nn.Module):
             img_shape = img_metas[img_id]['img_shape']
             scale_factor = img_metas[img_id]['scale_factor']
             proposals = self.get_bboxes_single(cls_score_list, bbox_pred_list,
-                                               mlvl_anchors, img_shape,
+                                               anchor_list[img_id], img_shape,
                                                scale_factor, cfg, rescale)
             result_list.append(proposals)
         return result_list
+
+    def refine_bboxes(self, anchor_list, bbox_preds, img_metas):
+        num_levels = len(bbox_preds)
+        new_anchor_list = []
+        for img_id in range(len(img_metas)):
+            mlvl_anchors = []
+            for i in range(num_levels):
+                bbox_pred = bbox_preds[i][img_id].detach()
+                bbox_pred = bbox_pred.permute(1, 2, 0).reshape(-1, 4)
+
+                # fix center
+                N = bbox_pred.shape[0]
+                device = bbox_pred.device
+                mask = torch.cat([torch.zeros((N, 2), device=device),
+                                  torch.ones((N, 2), device=device)], dim=1)
+                bbox_pred = bbox_pred * mask
+
+                img_shape = img_metas[img_id]['img_shape']
+                bboxes = delta2bbox(
+                    anchor_list[img_id][i], bbox_pred, self.target_means,
+                    self.target_stds, img_shape)
+                mlvl_anchors.append(bboxes)
+            new_anchor_list.append(mlvl_anchors)
+        return new_anchor_list
 
     def get_bboxes_single(self,
                           cls_scores,

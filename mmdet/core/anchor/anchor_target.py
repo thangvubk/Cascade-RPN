@@ -4,6 +4,88 @@ from ..bbox import assign_and_sample, build_assigner, PseudoSampler, bbox2delta
 from ..utils import multi_apply
 
 
+def anchor_offset(anchor_list, anchor_strides, featmap_sizes):
+    """ Get offest for deformable conv based on anchor shape
+    NOTE: currently support deformable kernel_size=3 and dilation=1
+
+    Args:
+        anchor_list (list[list[tensor])): [NI, NLVL, NA, 4] list of
+            multi-level anchors
+            anchor_strides (list): anchor stride of each level
+    Returns:
+        offset_list (list[tensor]): [NLVL, NA, 2, 18]: offset of 3x3 deformable
+        kernel.
+    """
+    def _shape_offset(anchors, stride):
+        # currently support kernel_size=3 and dilation=1
+        ks = 3
+        dilation = 1
+        pad = (ks - 1) // 2
+        idx = torch.arange(-pad, pad + 1, dtype=dtype, device=device)
+        xx, yy = torch.meshgrid(idx, idx)
+        xx = xx.reshape(-1)
+        yy = yy.reshape(-1)
+
+        pad = (ks - 1) // 2
+        idx = torch.arange(-pad, pad + 1, dtype=dtype, device=device)
+        xx, yy = torch.meshgrid(idx, idx)
+        xx = xx.reshape(-1)
+        yy = yy.reshape(-1)
+        w = (anchors[:, 2] - anchors[:, 0] + 1) / stride
+        h = (anchors[:, 3] - anchors[:, 1] + 1) / stride
+        w = w / ks - dilation
+        h = h / ks - dilation
+        offset_x = h[:, None] * xx  # (NA, ks**2)
+        offset_y = w[:, None] * yy  # (NA, ks**2)
+        return offset_x, offset_y
+
+    def _ctr_offset(anchors, stride, featmap_size):
+        feat_h, feat_w = featmap_size
+        assert len(anchors) == feat_h * feat_w
+
+        x = (anchors[:, 0] + anchors[:, 2]) * 0.5
+        y = (anchors[:, 1] + anchors[:, 3]) * 0.5
+        # compute centers on feature map
+        x = (x - (stride - 1) * 0.5) / stride
+        y = (y - (stride - 1) * 0.5) / stride
+        # compute predefine centers
+        xx = torch.arange(0, feat_w, device=anchors.device)
+        yy = torch.arange(0, feat_h, device=anchors.device)
+        yy, xx = torch.meshgrid(yy, xx)
+        xx = xx.reshape(-1).type_as(x)
+        yy = yy.reshape(-1).type_as(y)
+
+        offset_x = x - xx  # (NA, )
+        offset_y = y - yy  # (NA, )
+        return offset_x, offset_y
+
+    num_imgs = len(anchor_list)
+    num_lvls = len(anchor_list[0])
+    dtype = anchor_list[0][0].dtype
+    device = anchor_list[0][0].device
+    num_level_anchors = [anchors.size(0) for anchors in anchor_list[0]]
+
+    offset_list = []
+    for i in range(num_imgs):
+        mlvl_offset = []
+        for lvl in range(num_lvls):
+            c_offset_x, c_offset_y = _ctr_offset(
+                anchor_list[i][lvl], anchor_strides[lvl], featmap_sizes[lvl])
+            s_offset_x, s_offset_y = _shape_offset(
+                anchor_list[i][lvl], anchor_strides[lvl])
+
+            # offset = ctr_offset + shape_offset
+            offset_x = s_offset_x + c_offset_x[:, None]
+            offset_y = s_offset_y + c_offset_y[:, None]
+
+            offset = torch.stack([offset_x, offset_y], dim=-1)
+            offset = offset.reshape(offset.size(0), -1)  # [NA, 2*ks**2]
+            mlvl_offset.append(offset)
+        offset_list.append(torch.cat(mlvl_offset))  # [totalNA, 2*ks**2]
+    offset_list = images_to_levels(offset_list, num_level_anchors)
+    return offset_list
+
+
 def anchor_target(anchor_list,
                   valid_flag_list,
                   gt_bboxes_list,
@@ -36,10 +118,12 @@ def anchor_target(anchor_list,
     # anchor number of multi levels
     num_level_anchors = [anchors.size(0) for anchors in anchor_list[0]]
     # concat all level anchors and flags to a single tensor
+    _anchor_list = []
+    _valid_flag_list = []
     for i in range(num_imgs):
         assert len(anchor_list[i]) == len(valid_flag_list[i])
-        anchor_list[i] = torch.cat(anchor_list[i])
-        valid_flag_list[i] = torch.cat(valid_flag_list[i])
+        _anchor_list.append(torch.cat(anchor_list[i]))
+        _valid_flag_list.append(torch.cat(valid_flag_list[i]))
 
     # compute targets for each image
     if gt_bboxes_ignore_list is None:
@@ -49,8 +133,8 @@ def anchor_target(anchor_list,
     (all_labels, all_label_weights, all_bbox_targets, all_bbox_weights,
      pos_inds_list, neg_inds_list) = multi_apply(
          anchor_target_single,
-         anchor_list,
-         valid_flag_list,
+         _anchor_list,
+         _valid_flag_list,
          gt_bboxes_list,
          gt_bboxes_ignore_list,
          gt_labels_list,
@@ -86,7 +170,7 @@ def images_to_levels(target, num_level_anchors):
     start = 0
     for n in num_level_anchors:
         end = start + n
-        level_targets.append(target[:, start:end].squeeze(0))
+        level_targets.append(target[:, start:end])
         start = end
     return level_targets
 

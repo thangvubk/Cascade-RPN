@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from mmcv.cnn import normal_init
 
 from mmdet.core import delta2bbox
-from mmdet.ops import nms
+from mmdet.ops import nms, DeformConv
 from .anchor_head import AnchorHead
 from ..registry import HEADS
 
@@ -12,29 +12,47 @@ from ..registry import HEADS
 @HEADS.register_module
 class RPNHead(AnchorHead):
 
-    def __init__(self, in_channels, **kwargs):
+    def __init__(self, in_channels, feat_adapt=False, **kwargs):
+        self.feat_adapt = feat_adapt
         super(RPNHead, self).__init__(2, in_channels, **kwargs)
 
     def _init_layers(self):
-        self.rpn_conv = nn.Conv2d(
-            self.in_channels, self.feat_channels, 3, padding=1)
+        if self.feat_adapt:
+            self.adapt_conv = DeformConv(
+                self.feat_channels, self.feat_channels, 3, padding=1)
+        else:
+            self.rpn_conv = nn.Conv2d(
+                self.in_channels, self.feat_channels, 3, padding=1)
         self.rpn_cls = nn.Conv2d(self.feat_channels,
                                  self.num_anchors * self.cls_out_channels, 1)
         self.rpn_reg = nn.Conv2d(self.feat_channels, self.num_anchors * 4, 1)
 
     def init_weights(self):
-        normal_init(self.rpn_conv, std=0.01)
         normal_init(self.rpn_cls, std=0.01)
         normal_init(self.rpn_reg, std=0.01)
+        if self.feat_adapt:
+            normal_init(self.adapt_conv, std=0.01)
+        else:
+            normal_init(self.rpn_conv, std=0.01)
 
-    def forward_single(self, x):
-        x = self.rpn_conv(x)
+    def forward_single(self, x, offset=None):
+        if self.feat_adapt:
+            assert offset is not None
+            N, _, H, W = x.shape
+            assert H * W == offset.shape[1]
+            # reshape [N, NA, 18] to (N, 18, H, W)
+            offset = offset.permute(0, 2, 1).reshape(N, -1, H, W)
+            x = self.adapt_conv(x, offset)
+        else:
+            x = self.rpn_conv(x)
         x = F.relu(x, inplace=True)
         rpn_cls_score = self.rpn_cls(x)
         rpn_bbox_pred = self.rpn_reg(x)
         return rpn_cls_score, rpn_bbox_pred
 
     def loss(self,
+             anchor_list,
+             valid_flag_list,
              cls_scores,
              bbox_preds,
              gt_bboxes,
@@ -42,6 +60,8 @@ class RPNHead(AnchorHead):
              cfg,
              gt_bboxes_ignore=None):
         losses = super(RPNHead, self).loss(
+            anchor_list,
+            valid_flag_list,
             cls_scores,
             bbox_preds,
             gt_bboxes,
