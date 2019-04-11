@@ -238,14 +238,6 @@ class AnchorHead(nn.Module):
             for i in range(num_levels):
                 bbox_pred = bbox_preds[i][img_id].detach()
                 bbox_pred = bbox_pred.permute(1, 2, 0).reshape(-1, 4)
-
-                # fix center
-                N = bbox_pred.shape[0]
-                device = bbox_pred.device
-                mask = torch.cat([torch.zeros((N, 2), device=device),
-                                  torch.ones((N, 2), device=device)], dim=1)
-                bbox_pred = bbox_pred * mask
-
                 img_shape = img_metas[img_id]['img_shape']
                 bboxes = delta2bbox(
                     anchor_list[img_id][i], bbox_pred, self.target_means,
