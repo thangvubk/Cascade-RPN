@@ -8,7 +8,8 @@ from mmcv.cnn import normal_init
 from mmdet.core import (AnchorGenerator, anchor_target, delta2bbox,
                         multi_apply, weighted_cross_entropy, weighted_smoothl1,
                         weighted_binary_cross_entropy,
-                        weighted_sigmoid_focal_loss, multiclass_nms)
+                        weighted_sigmoid_focal_loss, multiclass_nms,
+                        iou_loss, giou_loss)
 from ..registry import HEADS
 
 
@@ -127,7 +128,7 @@ class AnchorHead(nn.Module):
 
         return anchor_list, valid_flag_list
 
-    def loss_single(self, cls_score, bbox_pred, labels, label_weights,
+    def loss_single(self, cls_score, bbox_pred, rois, labels, label_weights,
                     bbox_targets, bbox_weights, num_total_samples, cfg):
         # classification loss
         labels = labels.reshape(-1)
@@ -158,13 +159,38 @@ class AnchorHead(nn.Module):
         # regression loss
         bbox_targets = bbox_targets.reshape(-1, 4)
         bbox_weights = bbox_weights.reshape(-1, 4)
+        rois = rois.reshape(-1, 4)
         bbox_pred = bbox_pred.permute(0, 2, 3, 1).reshape(-1, 4)
-        loss_reg = weighted_smoothl1(
-            bbox_pred,
-            bbox_targets,
-            bbox_weights,
-            beta=cfg.smoothl1_beta,
-            avg_factor=num_total_samples)
+        bbox_loss_cfg = cfg.get('bbox_loss', None)
+        if bbox_loss_cfg is None:
+            loss_reg = weighted_smoothl1(
+                bbox_pred,
+                bbox_targets,
+                bbox_weights,
+                beta=cfg.smoothl1_beta,
+                avg_factor=num_total_samples)
+        elif bbox_loss_cfg.type == 'IoU':
+            loss_reg = iou_loss(
+                bbox_pred,
+                bbox_targets,
+                bbox_weights,
+                rois,
+                self.target_means,
+                self.target_stds,
+                reg_ratio=bbox_loss_cfg.reg_ratio,
+                avg_factor=num_total_samples)
+        elif bbox_loss_cfg.type == 'GIoU':
+            loss_reg = giou_loss(
+                bbox_pred,
+                bbox_targets,
+                bbox_weights,
+                rois,
+                self.target_means,
+                self.target_stds,
+                reg_ratio=bbox_loss_cfg.reg_ratio,
+                avg_factor=num_total_samples)
+        else:
+            raise Exception('Unknown config {}'.format(bbox_loss_cfg.type))
         return loss_cls, loss_reg
 
     def loss(self,
@@ -194,13 +220,14 @@ class AnchorHead(nn.Module):
         if cls_reg_targets is None:
             return None
         (labels_list, label_weights_list, bbox_targets_list, bbox_weights_list,
-         num_total_pos, num_total_neg) = cls_reg_targets
+         rois_list, num_total_pos, num_total_neg) = cls_reg_targets
         num_total_samples = (num_total_pos if self.use_focal_loss else
                              num_total_pos + num_total_neg)
         losses_cls, losses_reg = multi_apply(
             self.loss_single,
             cls_scores,
             bbox_preds,
+            rois_list,
             labels_list,
             label_weights_list,
             bbox_targets_list,

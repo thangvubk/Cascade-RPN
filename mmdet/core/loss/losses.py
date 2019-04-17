@@ -5,6 +5,9 @@ import torch.nn.functional as F
 from ...ops import sigmoid_focal_loss
 
 
+from mmdet.core import bbox_overlaps, delta2bbox
+
+
 def weighted_nll_loss(pred, label, weight, avg_factor=None):
     if avg_factor is None:
         avg_factor = max(torch.sum(weight > 0).float().item(), 1.)
@@ -127,3 +130,70 @@ def _expand_binary_labels(labels, label_weights, label_channels):
     bin_label_weights = label_weights.view(-1, 1).expand(
         label_weights.size(0), label_channels)
     return bin_labels, bin_label_weights
+
+
+def iou_loss(pred,
+             target,
+             weight,
+             rois,
+             target_means,
+             target_stds,
+             avg_factor=None,
+             reg_ratio=1.):
+    if avg_factor is None:
+        avg_factor = torch.sum(weight > 0).float().item() / 4 + 1e-6
+    pos_inds = weight.nonzero().view(-1, 8)[:, 0]
+    pos_mask = weight > 0
+    pos_bbox_pred = pred[pos_mask].view(-1, 4)
+    pos_bbox_target = target[pos_mask].view(-1, 4)
+    pos_rois = rois[pos_inds, :] if rois.shape[1] == 4 else rois[pos_inds, 1:]
+    pos_pred_bboxes = delta2bbox(pos_rois, pos_bbox_pred, target_means,
+                                 target_stds)
+    pos_target_bboxes = delta2bbox(pos_rois, pos_bbox_target, target_means,
+                                   target_stds)
+    ious = bbox_overlaps(pos_pred_bboxes, pos_target_bboxes, is_aligned=True)
+    iou_distances = 1 - ious
+    return torch.sum(iou_distances)[None] / avg_factor * reg_ratio
+
+
+def giou_loss(pred,
+              target,
+              weight,
+              rois,
+              target_means,
+              target_stds,
+              avg_factor=None,
+              reg_ratio=10.):
+    if avg_factor is None:
+        avg_factor = torch.sum(weight > 0).float().item() / 4 + 1e-6
+    pos_inds = weight.nonzero().view(-1, 8)[:, 0]
+    pos_mask = weight > 0
+    pos_bbox_pred = pred[pos_mask].view(-1, 4)
+    pos_bbox_target = target[pos_mask].view(-1, 4)
+    pos_rois = rois[pos_inds, :] if rois.shape[1] == 4 else rois[pos_inds, 1:]
+    pos_pred_bboxes = delta2bbox(pos_rois, pos_bbox_pred, target_means,
+                                 target_stds)
+    pos_target_bboxes = delta2bbox(pos_rois, pos_bbox_target, target_means,
+                                   target_stds)
+
+    bboxes1 = pos_pred_bboxes
+    bboxes2 = pos_target_bboxes
+    lt = torch.max(bboxes1[:, :2], bboxes2[:, :2])  # [rows, 2]
+    rb = torch.min(bboxes1[:, 2:], bboxes2[:, 2:])  # [rows, 2]
+
+    wh = (rb - lt + 1).clamp(min=0)  # [rows, 2]
+    overlap = wh[:, 0] * wh[:, 1]
+    ap = (bboxes1[:, 2] - bboxes1[:, 0] + 1) * (
+        bboxes1[:, 3] - bboxes1[:, 1] + 1)
+    ag = (bboxes2[:, 2] - bboxes2[:, 0] + 1) * (
+        bboxes2[:, 3] - bboxes2[:, 1] + 1)
+    ious = overlap / (ap + ag - overlap)
+
+    enclose_x1y1 = torch.min(pos_pred_bboxes[:, :2], pos_target_bboxes[:, :2])
+    enclose_x2y2 = torch.max(pos_pred_bboxes[:, 2:], pos_target_bboxes[:, 2:])
+    enclose_wh = (enclose_x2y2 - enclose_x1y1 + 1).clamp(min=0)
+    enclose_area = enclose_wh[:, 0] * enclose_wh[:, 1]
+    u = ap + ag - overlap
+    gious = ious - (enclose_area - u) / enclose_area
+    iou_distances = 1 - gious
+    return torch.sum(iou_distances)[None] / avg_factor * reg_ratio
