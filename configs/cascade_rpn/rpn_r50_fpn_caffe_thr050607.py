@@ -1,7 +1,7 @@
 # model settings
 model = dict(
     type='CascadeRPN',
-    num_stages=2,
+    num_stages=3,
     pretrained='pretrained/resnet50_convert.pt',
     backbone=dict(
         type='ResNet',
@@ -39,6 +39,17 @@ model = dict(
             target_means=[.0, .0, .0, .0],
             target_stds=[0.11, 0.11, 0.33, 0.33],
             use_sigmoid_cls=True,
+            feat_adapt=True),
+        dict(
+            type='RPNHead',
+            in_channels=256,
+            feat_channels=256,
+            anchor_scales=[8],
+            anchor_ratios=[1.0],
+            anchor_strides=[4, 8, 16, 32, 64],
+            target_means=[.0, .0, .0, .0],
+            target_stds=[0.11, 0.11, 0.33, 0.33],
+            use_sigmoid_cls=True,
             feat_adapt=True)
     ])
 # model training and testing settings
@@ -58,8 +69,8 @@ train_cfg = dict(
                 neg_pos_ub=-1,
                 add_gt_as_proposals=False),
             allowed_border=0,
-            pos_weight=-1,
             smoothl1_beta=1 / 9.0,
+            pos_weight=-1,
             debug=False),
         dict(
             assigner=dict(
@@ -75,8 +86,25 @@ train_cfg = dict(
                 neg_pos_ub=-1,
                 add_gt_as_proposals=False),
             allowed_border=0,
-            pos_weight=-1,
             smoothl1_beta=1 / 9.0,
+            pos_weight=-1,
+            debug=False),
+        dict(
+            assigner=dict(
+                type='MaxIoUAssigner',
+                pos_iou_thr=0.7,
+                neg_iou_thr=0.3,
+                min_pos_iou=0.3,
+                ignore_iof_thr=-1),
+            sampler=dict(
+                type='RandomSampler',
+                num=256,
+                pos_fraction=0.5,
+                neg_pos_ub=-1,
+                add_gt_as_proposals=False),
+            allowed_border=0,
+            smoothl1_beta=1 / 9.0,
+            pos_weight=-1,
             debug=False)
     ])
 test_cfg = dict(
@@ -85,7 +113,7 @@ test_cfg = dict(
         nms_pre=2000,
         nms_post=2000,
         max_num=2000,
-        nms_thr=0.7,
+        nms_thr=0.8,
         min_bbox_size=0))
 # dataset settings
 dataset_type = 'CocoDataset'
@@ -151,7 +179,7 @@ log_config = dict(
 total_epochs = 12
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
-work_dir = './work_dirs/caffe_thr0506_1x'
+work_dir = './work_dirs/caffe_thr050607_0.11-0.33_1x'
 load_from = None
 resume_from = None
 workflow = [('train', 1)]

@@ -24,10 +24,11 @@ model = dict(
             anchor_scales=[8],
             anchor_ratios=[1.0],
             anchor_strides=[4, 8, 16, 32, 64],
-            target_means=[.0, .0, -0.02, 0.13],
-            target_stds=[0.16, 0.18, 0.43, 0.41],
+            target_means=[.0, .0, .0, .0],
+            target_stds=[0.11, 0.11, 0.33, 0.33],
             use_sigmoid_cls=True,
-            feat_adapt=False),
+            feat_adapt=False,
+            dilation=3),
     ])
 # model training and testing settings
 train_cfg = dict(

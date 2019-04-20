@@ -12,17 +12,23 @@ from ..registry import HEADS
 @HEADS.register_module
 class RPNHead(AnchorHead):
 
-    def __init__(self, in_channels, feat_adapt=False, **kwargs):
+    def __init__(self, in_channels, feat_adapt=False, dilation=1, **kwargs):
+        # init here because _init_layers depends on feat_adapt
         self.feat_adapt = feat_adapt
+        self.dilation = dilation
         super(RPNHead, self).__init__(2, in_channels, **kwargs)
 
     def _init_layers(self):
         if self.feat_adapt:
+            assert self.dilation == 1
             self.adapt_conv = DeformConv(
                 self.feat_channels, self.feat_channels, 3, padding=1)
         else:
-            self.rpn_conv = nn.Conv2d(
-                self.in_channels, self.feat_channels, 3, padding=1)
+            self.rpn_conv = nn.Conv2d(self.in_channels,
+                                      self.feat_channels,
+                                      3,
+                                      padding=self.dilation,
+                                      dilation=self.dilation)
         self.rpn_cls = nn.Conv2d(self.feat_channels,
                                  self.num_anchors * self.cls_out_channels, 1)
         self.rpn_reg = nn.Conv2d(self.feat_channels, self.num_anchors * 4, 1)
