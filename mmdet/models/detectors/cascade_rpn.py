@@ -61,7 +61,11 @@ class CascadeRPN(BaseDetector, RPNTestMixin):
 
             offset_list = anchor_offset(
                 anchor_list, rpn_head.anchor_strides, featmap_sizes)
-            cls_score, bbox_pred = rpn_head(x, offset_list)
+            # check if feature are gated or not
+            if rpn_head.gated_feature:
+                x, cls_score, bbox_pred = rpn_head(x, offset_list)
+            else:
+                cls_score, bbox_pred = rpn_head(x, offset_list)
             rpn_loss_inputs = (
                 anchor_list, valid_flag_list, cls_score, bbox_pred,
                 gt_bboxes, img_meta, rpn_train_cfg)
@@ -86,7 +90,10 @@ class CascadeRPN(BaseDetector, RPNTestMixin):
             rpn_head = self.rpn_head[i]
             offset_list = anchor_offset(
                 anchor_list, rpn_head.anchor_strides, featmap_sizes)
-            cls_score, bbox_pred = rpn_head(x, offset_list)
+            if rpn_head.gated_feature:
+                x, cls_score, bbox_pred = rpn_head(x, offset_list)
+            else:
+                cls_score, bbox_pred = rpn_head(x, offset_list)
             # ms_score = [ms_score[lvl] + cls_score[lvl] / self.num_stages
             #             for lvl in range(len(cls_score))]
             if i < self.num_stages - 1:
