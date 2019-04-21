@@ -33,8 +33,8 @@ def anchor_offset(anchor_list, anchor_strides, featmap_sizes):
         yy = yy.reshape(-1)
         w = (anchors[:, 2] - anchors[:, 0] + 1) / stride
         h = (anchors[:, 3] - anchors[:, 1] + 1) / stride
-        w = w / ks - dilation
-        h = h / ks - dilation
+        w = w / (ks - 1) - dilation
+        h = h / (ks - 1) - dilation
         offset_x = w[:, None] * xx  # (NA, ks**2)
         offset_y = h[:, None] * yy  # (NA, ks**2)
         return offset_x, offset_y
