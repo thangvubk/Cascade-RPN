@@ -1,6 +1,6 @@
 import mmcv
 
-from mmdet.core import tensor2imgs, bbox_mapping
+from mmdet.core import tensor2imgs
 from .base import BaseDetector
 from .test_mixins import RPNTestMixin
 from .. import builder
@@ -47,16 +47,25 @@ class RPN(BaseDetector, RPNTestMixin):
             self.rpn_head.debug_imgs = tensor2imgs(img)
 
         x = self.extract_feat(img)
-        rpn_outs = self.rpn_head(x)
+        cls_score, bbox_pred = self.rpn_head(x)
 
-        rpn_loss_inputs = rpn_outs + (gt_bboxes, img_meta, self.train_cfg.rpn)
+        featmap_sizes = [featmap.size()[-2:] for featmap in x]
+        anchor_list, valid_flag_list = self.rpn_head.init_anchors(
+            featmap_sizes, img_meta)
+        rpn_loss_inputs = (
+            anchor_list, valid_flag_list, cls_score, bbox_pred,
+            gt_bboxes, img_meta, self.train_cfg.rpn)
         losses = self.rpn_head.loss(
             *rpn_loss_inputs, gt_bboxes_ignore=gt_bboxes_ignore)
         return losses
 
     def simple_test(self, img, img_meta, rescale=False):
         x = self.extract_feat(img)
-        proposal_list = self.simple_test_rpn(x, img_meta, self.test_cfg.rpn)
+        featmap_sizes = [featmap.size()[-2:] for featmap in x]
+        anchor_list, _ = self.rpn_head.init_anchors(featmap_sizes, img_meta)
+        cls_score, bbox_pred = self.rpn_head(x)
+        proposal_list = self.rpn_head.get_bboxes(
+            anchor_list, cls_score, bbox_pred, img_meta, self.test_cfg.rpn)
         if rescale:
             for proposals, meta in zip(proposal_list, img_meta):
                 proposals[:, :4] /= meta['scale_factor']
@@ -64,17 +73,18 @@ class RPN(BaseDetector, RPNTestMixin):
         return proposal_list[0].cpu().numpy()
 
     def aug_test(self, imgs, img_metas, rescale=False):
-        proposal_list = self.aug_test_rpn(
-            self.extract_feats(imgs), img_metas, self.test_cfg.rpn)
-        if not rescale:
-            for proposals, img_meta in zip(proposal_list, img_metas[0]):
-                img_shape = img_meta['img_shape']
-                scale_factor = img_meta['scale_factor']
-                flip = img_meta['flip']
-                proposals[:, :4] = bbox_mapping(proposals[:, :4], img_shape,
-                                                scale_factor, flip)
-        # TODO: remove this restriction
-        return proposal_list[0].cpu().numpy()
+        raise NotImplementedError
+        # proposal_list = self.aug_test_rpn(
+        #     self.extract_feats(imgs), img_metas, self.test_cfg.rpn)
+        # if not rescale:
+        #     for proposals, img_meta in zip(proposal_list, img_metas[0]):
+        #         img_shape = img_meta['img_shape']
+        #         scale_factor = img_meta['scale_factor']
+        #         flip = img_meta['flip']
+        #         proposals[:, :4] = bbox_mapping(proposals[:, :4], img_shape,
+        #                                         scale_factor, flip)
+        # # TODO: remove this restriction
+        # return proposal_list[0].cpu().numpy()
 
     def show_result(self, data, result, img_norm_cfg, dataset=None, top_k=20):
         """Show RPN proposals on the image.
