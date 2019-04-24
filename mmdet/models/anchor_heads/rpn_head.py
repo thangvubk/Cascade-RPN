@@ -44,6 +44,7 @@ class RPNHead(AnchorHead):
             normal_init(self.rpn_conv, std=0.01)
 
     def forward_single(self, x, offset, gated_feature=False):
+        gate = x
         if self.feat_adapt:
             assert offset is not None
             N, _, H, W = x.shape
@@ -57,7 +58,8 @@ class RPNHead(AnchorHead):
         rpn_cls_score = self.rpn_cls(x)
         rpn_bbox_pred = self.rpn_reg(x)
         if self.gated_feature:
-            return x, rpn_cls_score, rpn_bbox_pred
+            gate = gate + x
+            return gate, rpn_cls_score, rpn_bbox_pred
         else:
             return rpn_cls_score, rpn_bbox_pred
 
