@@ -43,7 +43,7 @@ class RPNHead(AnchorHead):
         else:
             normal_init(self.rpn_conv, std=0.01)
 
-    def forward_single(self, x, offset, gated_feature=False):
+    def forward_single(self, x, offset):
         gate = x
         if self.feat_adapt:
             assert offset is not None
