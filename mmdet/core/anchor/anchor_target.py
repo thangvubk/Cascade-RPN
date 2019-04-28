@@ -1,7 +1,173 @@
 import torch
 
-from ..bbox import assign_and_sample, build_assigner, PseudoSampler, bbox2delta
+from ..bbox import (assign_and_sample, build_assigner, PseudoSampler,
+                    bbox2delta, bbox_overlaps)
 from ..utils import multi_apply
+
+
+def calc_region(bbox, ratio, stride, featmap_size=None):
+    # Base anchor locates in (stride - 1) * 0.5
+    f_bbox = (bbox - (stride - 1) * 0.5) / stride
+    x1 = torch.round((1 - ratio) * f_bbox[0] + ratio * f_bbox[2])
+    y1 = torch.round((1 - ratio) * f_bbox[1] + ratio * f_bbox[3])
+    x2 = torch.round(ratio * f_bbox[0] + (1 - ratio) * f_bbox[2])
+    y2 = torch.round(ratio * f_bbox[1] + (1 - ratio) * f_bbox[3])
+    if featmap_size is not None:
+        x1 = x1.clamp(min=0, max=featmap_size[1] - 1)
+        y1 = y1.clamp(min=0, max=featmap_size[0] - 1)
+        x2 = x2.clamp(min=0, max=featmap_size[1] - 1)
+        y2 = y2.clamp(min=0, max=featmap_size[0] - 1)
+    return (x1, y1, x2, y2)
+
+
+def anchor_ctr_inside_region_flags(anchors, stride, region):
+    x1, y1, x2, y2 = region
+    f_anchors = (anchors - (stride - 1) * 0.5) / stride
+    x = (f_anchors[:, 0] + f_anchors[:, 2]) * 0.5
+    y = (f_anchors[:, 1] + f_anchors[:, 3]) * 0.5
+    flags = (x >= x1) & (x <= x2) & (y >= y1) & (y <= y2)
+    return flags
+
+
+def anchor_ctr_inside_region_inds(anchors, stride, region):
+    flags = anchor_ctr_inside_region_flags(anchors, stride, region)
+    return torch.nonzero(flags).squeeze(1)
+
+
+def ca_anchor_target(anchor_list,
+                     gt_bboxes_list,
+                     featmap_sizes,
+                     anchor_scale,
+                     anchor_strides,
+                     target_means,
+                     target_stds,
+                     cfg,
+                     label_channels=1):
+    """Cascade Anchoring: get anchor target, w.r.t. iou threshold
+        and region ratio.
+    1. Init all target and weight to be negative
+    2. Compute anchors and gt_bboxes on featmap
+    3. Compute center and ignore regions for each gt_bbox
+    4. Assign target and weight for ignore region
+    5. Compute ctr_pos_inds for center region
+    6. Compute iou_pos_inds for pos iou thr
+    7. Get intersection of ctr_pos_inds and iou_pos_inds then assign
+        target and weight
+    """
+    # TODO support multi-class
+    assert label_channels == 1, 'Support binary class label currently'
+    num_imgs = len(gt_bboxes_list)
+    num_lvls = len(featmap_sizes)
+    r1 = (1 - cfg.center_ratio) / 2
+    r2 = (1 - cfg.ignore_ratio) / 2
+    all_label_targets = []
+    all_label_weights = []
+    all_bbox_targets = []
+    all_bbox_weights = []
+    all_ignore_map = []
+
+    for lvl_id in range(num_lvls):
+        h, w = featmap_sizes[lvl_id]
+        label_targets = torch.zeros(
+            num_imgs, h * w, 1, device='cuda', dtype=torch.float32)
+        label_weights = torch.full_like(label_targets, -1)
+        bbox_targets = torch.zeros(
+            num_imgs, h * w, 4, device='cuda', dtype=torch.float32)
+        bbox_weights = torch.zeros_like(bbox_targets)
+        ignore_map = torch.zeros_like(label_targets)
+        all_label_targets.append(label_targets)
+        all_label_weights.append(label_weights)
+        all_bbox_targets.append(bbox_targets)
+        all_bbox_weights.append(bbox_weights)
+        all_ignore_map.append(ignore_map)
+
+    for img_id in range(num_imgs):
+        gt_bboxes = gt_bboxes_list[img_id]
+        scale = torch.sqrt((gt_bboxes[:, 2] - gt_bboxes[:, 0] + 1) *
+                           (gt_bboxes[:, 3] - gt_bboxes[:, 1] + 1))
+        min_anchor_size = scale.new_full(
+            (1, ), float(anchor_scale * anchor_strides[0]))
+        target_lvls = torch.floor(
+            torch.log2(scale) - torch.log2(min_anchor_size) + 0.5)
+        target_lvls = target_lvls.clamp(min=0, max=num_lvls - 1).long()
+
+        for gt_id in range(gt_bboxes.size(0)):
+            lvl = target_lvls[gt_id].item()
+            featmap_size = featmap_sizes[lvl]
+            stride = anchor_strides[lvl]
+
+            anchors = anchor_list[img_id][lvl]
+            gt_bbox = gt_bboxes[gt_id, :4]
+
+            # Compute ignore_inds and ctr_pos_inds
+            ignore_region = calc_region(gt_bbox, r2, stride, featmap_size)
+            ctr_region = calc_region(gt_bbox, r1, stride, featmap_size)
+            ignore_inds = anchor_ctr_inside_region_inds(
+                anchors, stride, ignore_region)
+            ctr_pos_flags = anchor_ctr_inside_region_flags(
+                anchors, stride, ctr_region)
+
+            # Compute iou_pos_inds
+            overlaps = bbox_overlaps(
+                gt_bbox[None, :], anchors).squeeze(0)
+            iou_pos_flags = overlaps > cfg.pos_iou_thr
+            # Assign pos for highest IoU
+            max_overlap = overlaps.max()
+            if max_overlap > cfg.min_pos_iou:
+                max_iou_flags = overlaps == max_overlap
+            else:
+                max_iou_flags = torch.zeros_like(iou_pos_flags).byte()
+            iou_pos_flags = iou_pos_flags | max_iou_flags
+
+            # Merge ctr_pos_flags and iou_pos_flags
+            # TODO: test iou
+            assert cfg.with_iou is False
+            pos_flags = (ctr_pos_flags & iou_pos_flags if cfg.with_iou
+                         else ctr_pos_flags)
+            pos_inds = torch.nonzero(pos_flags).squeeze(1)
+
+            all_label_targets[lvl][img_id, pos_inds, 0] = 1
+            all_label_weights[lvl][img_id, ignore_inds, 0] = 0
+            all_label_weights[lvl][img_id, pos_inds, 0] = 1
+
+            num_pos = pos_inds.shape[0]
+            gt_bbox_all_pos = gt_bbox.expand(num_pos, 4)
+            bbox_targets = bbox2delta(
+                anchors[pos_inds], gt_bbox_all_pos, target_means,
+                target_stds)
+            all_bbox_targets[lvl][img_id, pos_inds, :] = bbox_targets
+            all_bbox_weights[lvl][img_id, pos_inds, :] = 1
+
+            if lvl > 0:
+                d_lvl = lvl - 1
+                d_anchors = anchor_list[img_id][d_lvl]
+                d_featmap_size = featmap_sizes[d_lvl]
+                d_stride = anchor_strides[d_lvl]
+                d_ignore_region = calc_region(
+                    gt_bbox, d_stride, r2, d_featmap_size)
+                ignore_inds = anchor_ctr_inside_region_inds(
+                    d_anchors, d_stride, d_ignore_region)
+                all_ignore_map[d_lvl][img_id, ignore_inds, 0] = 1
+
+            if lvl < num_lvls - 1:
+                u_lvl = lvl + 1
+                u_anchors = anchor_list[img_id][u_lvl]
+                u_featmap_size = featmap_sizes[u_lvl]
+                u_stride = anchor_strides[u_lvl]
+                u_ignore_region = calc_region(
+                    gt_bbox, u_stride, r2, u_featmap_size)
+                ignore_inds = anchor_ctr_inside_region_inds(
+                    u_anchors, u_stride, u_ignore_region)
+                all_ignore_map[u_lvl][img_id, ignore_inds, 0] = 1
+
+    for lvl_id in range(num_lvls):
+        all_label_weights[lvl_id][(all_label_weights[lvl_id] < 0)
+                                  & (all_ignore_map[lvl_id] > 0)] = 0
+        all_label_weights[lvl_id][all_label_weights[lvl_id] < 0] = 0.1
+    num_total_samples = sum(
+        [t.size(0) * t.size(1) for t in all_label_targets]) / 200
+    return (all_label_targets, all_label_weights, all_bbox_targets,
+            all_bbox_weights, num_total_samples)
 
 
 def anchor_offset(anchor_list, anchor_strides, featmap_sizes):

@@ -9,7 +9,7 @@ from mmdet.core import (AnchorGenerator, anchor_target, delta2bbox,
                         multi_apply, weighted_cross_entropy, weighted_smoothl1,
                         weighted_binary_cross_entropy,
                         weighted_sigmoid_focal_loss, multiclass_nms,
-                        iou_loss, giou_loss)
+                        iou_loss, giou_loss, ca_anchor_target)
 from ..registry import HEADS
 
 
@@ -42,7 +42,8 @@ class AnchorHead(nn.Module):
                  target_means=(.0, .0, .0, .0),
                  target_stds=(1.0, 1.0, 1.0, 1.0),
                  use_sigmoid_cls=False,
-                 use_focal_loss=False):
+                 use_focal_loss=False,
+                 scale_fp_suppress=False):
         super(AnchorHead, self).__init__()
         self.in_channels = in_channels
         self.num_classes = num_classes
@@ -56,6 +57,7 @@ class AnchorHead(nn.Module):
         self.target_stds = target_stds
         self.use_sigmoid_cls = use_sigmoid_cls
         self.use_focal_loss = use_focal_loss
+        self.scale_fp_suppress = scale_fp_suppress
 
         self.anchor_generators = []
         for anchor_base in self.anchor_base_sizes:
@@ -159,7 +161,6 @@ class AnchorHead(nn.Module):
         # regression loss
         bbox_targets = bbox_targets.reshape(-1, 4)
         bbox_weights = bbox_weights.reshape(-1, 4)
-        rois = rois.reshape(-1, 4)
         bbox_pred = bbox_pred.permute(0, 2, 3, 1).reshape(-1, 4)
         bbox_loss_cfg = cfg.get('bbox_loss', None)
         if bbox_loss_cfg is None:
@@ -170,6 +171,7 @@ class AnchorHead(nn.Module):
                 beta=cfg.smoothl1_beta,
                 avg_factor=num_total_samples)
         elif bbox_loss_cfg.type == 'IoU':
+            rois = rois.reshape(-1, 4)
             loss_reg = iou_loss(
                 bbox_pred,
                 bbox_targets,
@@ -180,6 +182,7 @@ class AnchorHead(nn.Module):
                 reg_ratio=bbox_loss_cfg.reg_ratio,
                 avg_factor=num_total_samples)
         elif bbox_loss_cfg.type == 'GIoU':
+            rois = rois.reshape(-1, 4)
             loss_reg = giou_loss(
                 bbox_pred,
                 bbox_targets,
@@ -203,26 +206,47 @@ class AnchorHead(nn.Module):
              img_metas,
              cfg,
              gt_bboxes_ignore=None):
+        featmap_sizes = [featmap.size()[-2:] for featmap in cls_scores]
         sampling = False if self.use_focal_loss else True
         label_channels = self.cls_out_channels if self.use_sigmoid_cls else 1
-        cls_reg_targets = anchor_target(
-            anchor_list,
-            valid_flag_list,
-            gt_bboxes,
-            img_metas,
-            self.target_means,
-            self.target_stds,
-            cfg,
-            gt_bboxes_ignore_list=gt_bboxes_ignore,
-            gt_labels_list=gt_labels,
-            label_channels=label_channels,
-            sampling=sampling)
-        if cls_reg_targets is None:
-            return None
-        (labels_list, label_weights_list, bbox_targets_list, bbox_weights_list,
-         rois_list, num_total_pos, num_total_neg) = cls_reg_targets
-        num_total_samples = (num_total_pos if self.use_focal_loss else
-                             num_total_pos + num_total_neg)
+        if self.scale_fp_suppress:
+            assert self.use_focal_loss, 'Only focal loss is supported in \
+                scale-false-positive-suppression'
+            cls_reg_targets = ca_anchor_target(
+                anchor_list,
+                gt_bboxes,
+                featmap_sizes,
+                self.anchor_scales[0],
+                self.anchor_strides,
+                self.target_means,
+                self.target_stds,
+                cfg,
+                label_channels=label_channels)
+            if cls_reg_targets is None:
+                return None
+            (labels_list, label_weights_list, bbox_targets_list,
+             bbox_weights_list, num_total_samples) = cls_reg_targets
+            rois_list = [None for _ in labels_list]
+        else:
+            cls_reg_targets = anchor_target(
+                anchor_list,
+                valid_flag_list,
+                gt_bboxes,
+                img_metas,
+                self.target_means,
+                self.target_stds,
+                cfg,
+                gt_bboxes_ignore_list=gt_bboxes_ignore,
+                gt_labels_list=gt_labels,
+                label_channels=label_channels,
+                sampling=sampling)
+            if cls_reg_targets is None:
+                return None
+            (labels_list, label_weights_list, bbox_targets_list,
+             bbox_weights_list, rois_list, num_total_pos, num_total_neg
+             ) = cls_reg_targets
+            num_total_samples = (num_total_pos if self.use_focal_loss else
+                                 num_total_pos + num_total_neg)
         losses_cls, losses_reg = multi_apply(
             self.loss_single,
             cls_scores,
