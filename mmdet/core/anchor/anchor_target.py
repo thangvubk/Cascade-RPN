@@ -121,8 +121,8 @@ def ca_anchor_target(anchor_list,
 
             # Merge ctr_pos_flags and iou_pos_flags
             # TODO: test iou
-            assert cfg.with_iou is False
-            pos_flags = (ctr_pos_flags & iou_pos_flags if cfg.with_iou
+            # assert cfg.with_iou is False
+            pos_flags = (ctr_pos_flags | iou_pos_flags if cfg.with_iou
                          else ctr_pos_flags)
             pos_inds = torch.nonzero(pos_flags).squeeze(1)
 

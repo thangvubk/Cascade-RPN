@@ -7,6 +7,7 @@ from mmdet.core import delta2bbox
 from mmdet.ops import nms, DeformConv
 from .anchor_head import AnchorHead
 from ..registry import HEADS
+from ..utils import bias_init_with_prob
 
 
 @HEADS.register_module
@@ -36,7 +37,11 @@ class RPNHead(AnchorHead):
         self.rpn_reg = nn.Conv2d(self.feat_channels, self.num_anchors * 4, 1)
 
     def init_weights(self):
-        normal_init(self.rpn_cls, std=0.01)
+        if self.use_focal_loss:
+            cls_bias = bias_init_with_prob(0.01)
+            normal_init(self.rpn_cls, std=0.01, bias=cls_bias)
+        else:
+            normal_init(self.rpn_cls, std=0.01)
         normal_init(self.rpn_reg, std=0.01)
         if self.feat_adapt:
             normal_init(self.adapt_conv, std=0.01)
@@ -44,7 +49,6 @@ class RPNHead(AnchorHead):
             normal_init(self.rpn_conv, std=0.01)
 
     def forward_single(self, x, offset):
-        gate = x
         if self.feat_adapt:
             assert offset is not None
             N, _, H, W = x.shape
@@ -58,8 +62,7 @@ class RPNHead(AnchorHead):
         rpn_cls_score = self.rpn_cls(x)
         rpn_bbox_pred = self.rpn_reg(x)
         if self.gated_feature:
-            gate = gate + x
-            return gate, rpn_cls_score, rpn_bbox_pred
+            return x, rpn_cls_score, rpn_bbox_pred
         else:
             return rpn_cls_score, rpn_bbox_pred
 
