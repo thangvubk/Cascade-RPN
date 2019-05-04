@@ -69,8 +69,9 @@ def ca_anchor_target(anchor_list,
     for lvl_id in range(num_lvls):
         h, w = featmap_sizes[lvl_id]
         label_targets = torch.zeros(
-            num_imgs, h * w, 1, device='cuda', dtype=torch.float32)
-        label_weights = torch.full_like(label_targets, -1)
+            num_imgs, h * w, 1, device='cuda', dtype=torch.long)
+        label_weights = torch.full_like(label_targets, -1.0,
+                                        dtype=torch.float32)
         bbox_targets = torch.zeros(
             num_imgs, h * w, 4, device='cuda', dtype=torch.float32)
         bbox_weights = torch.zeros_like(bbox_targets)
@@ -103,7 +104,7 @@ def ca_anchor_target(anchor_list,
             ignore_region = calc_region(gt_bbox, r2, stride, featmap_size)
             ctr_region = calc_region(gt_bbox, r1, stride, featmap_size)
             ignore_inds = anchor_ctr_inside_region_inds(
-                anchors, stride, ignore_region)
+                anchors, stride, ignore_region) 
             ctr_pos_flags = anchor_ctr_inside_region_flags(
                 anchors, stride, ctr_region)
 
@@ -127,8 +128,8 @@ def ca_anchor_target(anchor_list,
             pos_inds = torch.nonzero(pos_flags).squeeze(1)
 
             all_label_targets[lvl][img_id, pos_inds, 0] = 1
-            all_label_weights[lvl][img_id, ignore_inds, 0] = 0
-            all_label_weights[lvl][img_id, pos_inds, 0] = 1
+            all_label_weights[lvl][img_id, ignore_inds, 0] = 0.0
+            all_label_weights[lvl][img_id, pos_inds, 0] = 1.0
 
             num_pos = pos_inds.shape[0]
             gt_bbox_all_pos = gt_bbox.expand(num_pos, 4)
@@ -136,7 +137,7 @@ def ca_anchor_target(anchor_list,
                 anchors[pos_inds], gt_bbox_all_pos, target_means,
                 target_stds)
             all_bbox_targets[lvl][img_id, pos_inds, :] = bbox_targets
-            all_bbox_weights[lvl][img_id, pos_inds, :] = 1
+            all_bbox_weights[lvl][img_id, pos_inds, :] = 1.0
 
             if lvl > 0:
                 d_lvl = lvl - 1
@@ -162,7 +163,7 @@ def ca_anchor_target(anchor_list,
 
     for lvl_id in range(num_lvls):
         all_label_weights[lvl_id][(all_label_weights[lvl_id] < 0)
-                                  & (all_ignore_map[lvl_id] > 0)] = 0
+                                  & (all_ignore_map[lvl_id] > 0)] = 0.0
         all_label_weights[lvl_id][all_label_weights[lvl_id] < 0] = 0.1
     num_total_samples = sum(
         [t.size(0) * t.size(1) for t in all_label_targets]) / 200
