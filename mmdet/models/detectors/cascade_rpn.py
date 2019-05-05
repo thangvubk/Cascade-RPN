@@ -61,11 +61,18 @@ class CascadeRPN(BaseDetector, RPNTestMixin):
 
             offset_list = anchor_offset(
                 anchor_list, rpn_head.anchor_strides, featmap_sizes)
-            # check if feature are gated or not
-            if rpn_head.gated_feature:
-                x, cls_score, bbox_pred = rpn_head(x, offset_list)
+            # check with_cls and gated_feature
+            if rpn_head.with_cls:
+                if rpn_head.gated_feature:
+                    x, cls_score, bbox_pred = rpn_head(x, offset_list)
+                else:
+                    cls_score, bbox_pred = rpn_head(x, offset_list)
             else:
-                cls_score, bbox_pred = rpn_head(x, offset_list)
+                if rpn_head.gated_feature:
+                    x, bbox_pred = rpn_head(x, offset_list)
+                else:
+                    bbox_pred = rpn_head(x, offset_list)[0]  # returned tupple
+                cls_score = [None for _ in bbox_pred]
             rpn_loss_inputs = (
                 anchor_list, valid_flag_list, cls_score, bbox_pred,
                 gt_bboxes, img_meta, rpn_train_cfg)
@@ -90,10 +97,16 @@ class CascadeRPN(BaseDetector, RPNTestMixin):
             rpn_head = self.rpn_head[i]
             offset_list = anchor_offset(
                 anchor_list, rpn_head.anchor_strides, featmap_sizes)
-            if rpn_head.gated_feature:
-                x, cls_score, bbox_pred = rpn_head(x, offset_list)
+            if rpn_head.with_cls:
+                if rpn_head.gated_feature:
+                    x, cls_score, bbox_pred = rpn_head(x, offset_list)
+                else:
+                    cls_score, bbox_pred = rpn_head(x, offset_list)
             else:
-                cls_score, bbox_pred = rpn_head(x, offset_list)
+                if rpn_head.gated_feature:
+                    x, bbox_pred = rpn_head(x, offset_list)
+                else:
+                    bbox_pred = rpn_head(x, offset_list)[0]  # returned tupple
             # ms_score = [ms_score[lvl] + cls_score[lvl] / self.num_stages
             #             for lvl in range(len(cls_score))]
             if i < self.num_stages - 1:

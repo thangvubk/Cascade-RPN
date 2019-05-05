@@ -3,7 +3,6 @@ from __future__ import division
 import numpy as np
 import torch
 import torch.nn as nn
-from mmcv.cnn import normal_init
 
 from mmdet.core import (AnchorGenerator, anchor_target, delta2bbox,
                         multi_apply, weighted_cross_entropy, weighted_smoothl1,
@@ -43,7 +42,8 @@ class AnchorHead(nn.Module):
                  target_stds=(1.0, 1.0, 1.0, 1.0),
                  use_sigmoid_cls=False,
                  use_focal_loss=False,
-                 scale_fp_suppress=False):
+                 scale_fp_suppress=False,
+                 with_cls=True):
         super(AnchorHead, self).__init__()
         self.in_channels = in_channels
         self.num_classes = num_classes
@@ -58,6 +58,7 @@ class AnchorHead(nn.Module):
         self.use_sigmoid_cls = use_sigmoid_cls
         self.use_focal_loss = use_focal_loss
         self.scale_fp_suppress = scale_fp_suppress
+        self.with_cls = with_cls
 
         self.anchor_generators = []
         for anchor_base in self.anchor_base_sizes:
@@ -70,21 +71,14 @@ class AnchorHead(nn.Module):
         else:
             self.cls_out_channels = self.num_classes
 
-        self._init_layers()
-
     def _init_layers(self):
-        self.conv_cls = nn.Conv2d(self.feat_channels,
-                                  self.num_anchors * self.cls_out_channels, 1)
-        self.conv_reg = nn.Conv2d(self.feat_channels, self.num_anchors * 4, 1)
+        raise NotImplementedError
 
     def init_weights(self):
-        normal_init(self.conv_cls, std=0.01)
-        normal_init(self.conv_reg, std=0.01)
+        raise NotImplementedError
 
-    def forward_single(self, x):
-        cls_score = self.conv_cls(x)
-        bbox_pred = self.conv_reg(x)
-        return cls_score, bbox_pred
+    def forward_single(self, x, offset):
+        raise NotImplementedError
 
     def forward(self, feats, offset_list=None):
         if offset_list is None:
@@ -92,7 +86,7 @@ class AnchorHead(nn.Module):
         return multi_apply(self.forward_single, feats, offset_list)
 
     def init_anchors(self, featmap_sizes, img_metas):
-        """Get anchors according to feature map sizes.
+        """Init anchors according to feature map sizes.
 
         Args:
             featmap_sizes (list[tuple]): Multi-level feature map sizes.
@@ -133,31 +127,32 @@ class AnchorHead(nn.Module):
     def loss_single(self, cls_score, bbox_pred, rois, labels, label_weights,
                     bbox_targets, bbox_weights, num_total_samples, cfg):
         # classification loss
-        labels = labels.reshape(-1)
-        label_weights = label_weights.reshape(-1)
-        cls_score = cls_score.permute(0, 2, 3, 1).reshape(
-            -1, self.cls_out_channels)
-        if self.use_sigmoid_cls:
-            if self.use_focal_loss:
-                cls_criterion = weighted_sigmoid_focal_loss
+        if self.with_cls:
+            labels = labels.reshape(-1)
+            label_weights = label_weights.reshape(-1)
+            cls_score = cls_score.permute(0, 2, 3, 1).reshape(
+                -1, self.cls_out_channels)
+            if self.use_sigmoid_cls:
+                if self.use_focal_loss:
+                    cls_criterion = weighted_sigmoid_focal_loss
+                else:
+                    cls_criterion = weighted_binary_cross_entropy
             else:
-                cls_criterion = weighted_binary_cross_entropy
-        else:
+                if self.use_focal_loss:
+                    raise NotImplementedError
+                else:
+                    cls_criterion = weighted_cross_entropy
             if self.use_focal_loss:
-                raise NotImplementedError
+                loss_cls = cls_criterion(
+                    cls_score,
+                    labels,
+                    label_weights,
+                    gamma=cfg.gamma,
+                    alpha=cfg.alpha,
+                    avg_factor=num_total_samples)
             else:
-                cls_criterion = weighted_cross_entropy
-        if self.use_focal_loss:
-            loss_cls = cls_criterion(
-                cls_score,
-                labels,
-                label_weights,
-                gamma=cfg.gamma,
-                alpha=cfg.alpha,
-                avg_factor=num_total_samples)
-        else:
-            loss_cls = cls_criterion(
-                cls_score, labels, label_weights, avg_factor=num_total_samples)
+                loss_cls = cls_criterion(cls_score, labels, label_weights,
+                                         avg_factor=num_total_samples)
         # regression loss
         bbox_targets = bbox_targets.reshape(-1, 4)
         bbox_weights = bbox_weights.reshape(-1, 4)
@@ -194,7 +189,9 @@ class AnchorHead(nn.Module):
                 avg_factor=num_total_samples)
         else:
             raise Exception('Unknown config {}'.format(bbox_loss_cfg.type))
-        return loss_cls, loss_reg
+        if self.with_cls:
+            return loss_cls, loss_reg
+        return None, loss_reg,
 
     def loss(self,
              anchor_list,
@@ -206,12 +203,10 @@ class AnchorHead(nn.Module):
              img_metas,
              cfg,
              gt_bboxes_ignore=None):
-        featmap_sizes = [featmap.size()[-2:] for featmap in cls_scores]
+        featmap_sizes = [featmap.size()[-2:] for featmap in bbox_preds]
         sampling = False if self.use_focal_loss else True
         label_channels = self.cls_out_channels if self.use_sigmoid_cls else 1
         if self.scale_fp_suppress:
-            assert self.use_focal_loss, 'Only focal loss is supported in \
-                scale-false-positive-suppression'
             cls_reg_targets = ca_anchor_target(
                 anchor_list,
                 gt_bboxes,
@@ -246,7 +241,7 @@ class AnchorHead(nn.Module):
              ) = cls_reg_targets
             num_total_samples = (num_total_pos if self.use_focal_loss else
                                  num_total_pos + num_total_neg)
-        losses_cls, losses_reg = multi_apply(
+        losses = multi_apply(
             self.loss_single,
             cls_scores,
             bbox_preds,
@@ -257,7 +252,9 @@ class AnchorHead(nn.Module):
             bbox_weights_list,
             num_total_samples=num_total_samples,
             cfg=cfg)
-        return dict(loss_cls=losses_cls, loss_reg=losses_reg)
+        if self.with_cls:
+            return dict(loss_cls=losses[0], loss_reg=losses[1])
+        return dict(loss_reg=losses[1])
 
     def get_bboxes(self, anchor_list, cls_scores, bbox_preds, img_metas, cfg,
                    rescale=False):
