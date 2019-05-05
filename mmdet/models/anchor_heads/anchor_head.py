@@ -225,8 +225,7 @@ class AnchorHead(nn.Module):
             if cls_reg_targets is None:
                 return None
             (labels_list, label_weights_list, bbox_targets_list,
-             bbox_weights_list, num_total_samples) = cls_reg_targets
-            rois_list = [None for _ in labels_list]
+             bbox_weights_list, rois_list, num_total_samples) = cls_reg_targets
         else:
             cls_reg_targets = anchor_target(
                 anchor_list,

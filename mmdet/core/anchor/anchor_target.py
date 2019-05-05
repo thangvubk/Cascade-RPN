@@ -167,8 +167,19 @@ def ca_anchor_target(anchor_list,
         all_label_weights[lvl_id][all_label_weights[lvl_id] < 0] = 0.1
     num_total_samples = sum(
         [t.size(0) * t.size(1) for t in all_label_targets]) / 200
+    rois_list = anchor2rois(anchor_list)
     return (all_label_targets, all_label_weights, all_bbox_targets,
-            all_bbox_weights, num_total_samples)
+            all_bbox_weights, rois_list, num_total_samples)
+
+
+def anchor2rois(anchor_list):
+    num_level_anchors = [anchors.size(0) for anchors in anchor_list[0]]
+    _anchor_list = []
+    num_imgs = len(anchor_list)
+    for i in range(num_imgs):
+        _anchor_list.append(torch.cat(anchor_list[i]))
+    rois_list = images_to_levels(_anchor_list, num_level_anchors)
+    return rois_list
 
 
 def anchor_offset(anchor_list, anchor_strides, featmap_sizes):
