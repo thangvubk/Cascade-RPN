@@ -3,17 +3,17 @@ from __future__ import division
 import numpy as np
 import torch
 import torch.nn as nn
-from mmcv.cnn import normal_init
 
 from mmdet.core import (AnchorGenerator, anchor_target, delta2bbox,
                         multi_apply, weighted_cross_entropy, weighted_smoothl1,
                         weighted_binary_cross_entropy,
-                        weighted_sigmoid_focal_loss, multiclass_nms)
+                        weighted_sigmoid_focal_loss, multiclass_nms,
+                        iou_loss, giou_loss, ca_anchor_target)
 from ..registry import HEADS
 
 
 @HEADS.register_module
-class AnchorHead(nn.Module):
+class CascadeAnchorHead(nn.Module):
     """Anchor-based head (RPN, RetinaNet, SSD, etc.).
 
     Args:
@@ -41,8 +41,10 @@ class AnchorHead(nn.Module):
                  target_means=(.0, .0, .0, .0),
                  target_stds=(1.0, 1.0, 1.0, 1.0),
                  use_sigmoid_cls=False,
-                 use_focal_loss=False):
-        super(AnchorHead, self).__init__()
+                 use_focal_loss=False,
+                 scale_fp_suppress=False,
+                 with_cls=True):
+        super(CascadeAnchorHead, self).__init__()
         self.in_channels = in_channels
         self.num_classes = num_classes
         self.feat_channels = feat_channels
@@ -55,6 +57,8 @@ class AnchorHead(nn.Module):
         self.target_stds = target_stds
         self.use_sigmoid_cls = use_sigmoid_cls
         self.use_focal_loss = use_focal_loss
+        self.scale_fp_suppress = scale_fp_suppress
+        self.with_cls = with_cls
 
         self.anchor_generators = []
         for anchor_base in self.anchor_base_sizes:
@@ -67,27 +71,22 @@ class AnchorHead(nn.Module):
         else:
             self.cls_out_channels = self.num_classes
 
-        self._init_layers()
-
     def _init_layers(self):
-        self.conv_cls = nn.Conv2d(self.feat_channels,
-                                  self.num_anchors * self.cls_out_channels, 1)
-        self.conv_reg = nn.Conv2d(self.feat_channels, self.num_anchors * 4, 1)
+        raise NotImplementedError
 
     def init_weights(self):
-        normal_init(self.conv_cls, std=0.01)
-        normal_init(self.conv_reg, std=0.01)
+        raise NotImplementedError
 
-    def forward_single(self, x):
-        cls_score = self.conv_cls(x)
-        bbox_pred = self.conv_reg(x)
-        return cls_score, bbox_pred
+    def forward_single(self, x, offset):
+        raise NotImplementedError
 
-    def forward(self, feats):
-        return multi_apply(self.forward_single, feats)
+    def forward(self, feats, offset_list=None):
+        if offset_list is None:
+            offset_list = [None for _ in range(len(feats))]
+        return multi_apply(self.forward_single, feats, offset_list)
 
-    def get_anchors(self, featmap_sizes, img_metas):
-        """Get anchors according to feature map sizes.
+    def init_anchors(self, featmap_sizes, img_metas):
+        """Init anchors according to feature map sizes.
 
         Args:
             featmap_sizes (list[tuple]): Multi-level feature map sizes.
@@ -125,47 +124,78 @@ class AnchorHead(nn.Module):
 
         return anchor_list, valid_flag_list
 
-    def loss_single(self, cls_score, bbox_pred, labels, label_weights,
+    def loss_single(self, cls_score, bbox_pred, rois, labels, label_weights,
                     bbox_targets, bbox_weights, num_total_samples, cfg):
         # classification loss
-        labels = labels.reshape(-1)
-        label_weights = label_weights.reshape(-1)
-        cls_score = cls_score.permute(0, 2, 3, 1).reshape(
-            -1, self.cls_out_channels)
-        if self.use_sigmoid_cls:
-            if self.use_focal_loss:
-                cls_criterion = weighted_sigmoid_focal_loss
+        if self.with_cls:
+            labels = labels.reshape(-1)
+            label_weights = label_weights.reshape(-1)
+            cls_score = cls_score.permute(0, 2, 3, 1).reshape(
+                -1, self.cls_out_channels)
+            if self.use_sigmoid_cls:
+                if self.use_focal_loss:
+                    cls_criterion = weighted_sigmoid_focal_loss
+                else:
+                    cls_criterion = weighted_binary_cross_entropy
             else:
-                cls_criterion = weighted_binary_cross_entropy
-        else:
+                if self.use_focal_loss:
+                    raise NotImplementedError
+                else:
+                    cls_criterion = weighted_cross_entropy
             if self.use_focal_loss:
-                raise NotImplementedError
+                loss_cls = cls_criterion(
+                    cls_score,
+                    labels,
+                    label_weights,
+                    gamma=cfg.gamma,
+                    alpha=cfg.alpha,
+                    avg_factor=num_total_samples)
             else:
-                cls_criterion = weighted_cross_entropy
-        if self.use_focal_loss:
-            loss_cls = cls_criterion(
-                cls_score,
-                labels,
-                label_weights,
-                gamma=cfg.gamma,
-                alpha=cfg.alpha,
-                avg_factor=num_total_samples)
-        else:
-            loss_cls = cls_criterion(
-                cls_score, labels, label_weights, avg_factor=num_total_samples)
+                loss_cls = cls_criterion(cls_score, labels, label_weights,
+                                         avg_factor=num_total_samples)
         # regression loss
         bbox_targets = bbox_targets.reshape(-1, 4)
         bbox_weights = bbox_weights.reshape(-1, 4)
         bbox_pred = bbox_pred.permute(0, 2, 3, 1).reshape(-1, 4)
-        loss_reg = weighted_smoothl1(
-            bbox_pred,
-            bbox_targets,
-            bbox_weights,
-            beta=cfg.smoothl1_beta,
-            avg_factor=num_total_samples)
-        return loss_cls, loss_reg
+        bbox_loss_cfg = cfg.get('bbox_loss', None)
+        if bbox_loss_cfg is None:
+            loss_reg = weighted_smoothl1(
+                bbox_pred,
+                bbox_targets,
+                bbox_weights,
+                beta=cfg.smoothl1_beta,
+                avg_factor=num_total_samples)
+        elif bbox_loss_cfg.type == 'IoU':
+            rois = rois.reshape(-1, 4)
+            loss_reg = iou_loss(
+                bbox_pred,
+                bbox_targets,
+                bbox_weights,
+                rois,
+                self.target_means,
+                self.target_stds,
+                reg_ratio=bbox_loss_cfg.reg_ratio,
+                avg_factor=num_total_samples)
+        elif bbox_loss_cfg.type == 'GIoU':
+            rois = rois.reshape(-1, 4)
+            loss_reg = giou_loss(
+                bbox_pred,
+                bbox_targets,
+                bbox_weights,
+                rois,
+                self.target_means,
+                self.target_stds,
+                reg_ratio=bbox_loss_cfg.reg_ratio,
+                avg_factor=num_total_samples)
+        else:
+            raise Exception('Unknown config {}'.format(bbox_loss_cfg.type))
+        if self.with_cls:
+            return loss_cls, loss_reg
+        return None, loss_reg,
 
     def loss(self,
+             anchor_list,
+             valid_flag_list,
              cls_scores,
              bbox_preds,
              gt_bboxes,
@@ -173,53 +203,64 @@ class AnchorHead(nn.Module):
              img_metas,
              cfg,
              gt_bboxes_ignore=None):
-        featmap_sizes = [featmap.size()[-2:] for featmap in cls_scores]
-        assert len(featmap_sizes) == len(self.anchor_generators)
-
-        anchor_list, valid_flag_list = self.get_anchors(
-            featmap_sizes, img_metas)
+        featmap_sizes = [featmap.size()[-2:] for featmap in bbox_preds]
         sampling = False if self.use_focal_loss else True
         label_channels = self.cls_out_channels if self.use_sigmoid_cls else 1
-        cls_reg_targets = anchor_target(
-            anchor_list,
-            valid_flag_list,
-            gt_bboxes,
-            img_metas,
-            self.target_means,
-            self.target_stds,
-            cfg,
-            gt_bboxes_ignore_list=gt_bboxes_ignore,
-            gt_labels_list=gt_labels,
-            label_channels=label_channels,
-            sampling=sampling)
-        if cls_reg_targets is None:
-            return None
-        (labels_list, label_weights_list, bbox_targets_list, bbox_weights_list,
-         num_total_pos, num_total_neg) = cls_reg_targets
-        num_total_samples = (num_total_pos if self.use_focal_loss else
-                             num_total_pos + num_total_neg)
-        losses_cls, losses_reg = multi_apply(
+        if self.scale_fp_suppress:
+            cls_reg_targets = ca_anchor_target(
+                anchor_list,
+                gt_bboxes,
+                featmap_sizes,
+                self.anchor_scales[0],
+                self.anchor_strides,
+                self.target_means,
+                self.target_stds,
+                cfg,
+                label_channels=label_channels)
+            if cls_reg_targets is None:
+                return None
+            (labels_list, label_weights_list, bbox_targets_list,
+             bbox_weights_list, rois_list, num_total_samples) = cls_reg_targets
+        else:
+            cls_reg_targets = anchor_target(
+                anchor_list,
+                valid_flag_list,
+                gt_bboxes,
+                img_metas,
+                self.target_means,
+                self.target_stds,
+                cfg,
+                gt_bboxes_ignore_list=gt_bboxes_ignore,
+                gt_labels_list=gt_labels,
+                label_channels=label_channels,
+                sampling=sampling)
+            if cls_reg_targets is None:
+                return None
+            (labels_list, label_weights_list, bbox_targets_list,
+             bbox_weights_list, rois_list, num_total_pos, num_total_neg
+             ) = cls_reg_targets
+            num_total_samples = (num_total_pos if self.use_focal_loss else
+                                 num_total_pos + num_total_neg)
+        losses = multi_apply(
             self.loss_single,
             cls_scores,
             bbox_preds,
+            rois_list,
             labels_list,
             label_weights_list,
             bbox_targets_list,
             bbox_weights_list,
             num_total_samples=num_total_samples,
             cfg=cfg)
-        return dict(loss_cls=losses_cls, loss_reg=losses_reg)
+        if self.with_cls:
+            return dict(loss_cls=losses[0], loss_reg=losses[1])
+        return dict(loss_reg=losses[1])
 
-    def get_bboxes(self, cls_scores, bbox_preds, img_metas, cfg,
+    def get_bboxes(self, anchor_list, cls_scores, bbox_preds, img_metas, cfg,
                    rescale=False):
         assert len(cls_scores) == len(bbox_preds)
         num_levels = len(cls_scores)
 
-        mlvl_anchors = [
-            self.anchor_generators[i].grid_anchors(cls_scores[i].size()[-2:],
-                                                   self.anchor_strides[i])
-            for i in range(num_levels)
-        ]
         result_list = []
         for img_id in range(len(img_metas)):
             cls_score_list = [
@@ -231,10 +272,26 @@ class AnchorHead(nn.Module):
             img_shape = img_metas[img_id]['img_shape']
             scale_factor = img_metas[img_id]['scale_factor']
             proposals = self.get_bboxes_single(cls_score_list, bbox_pred_list,
-                                               mlvl_anchors, img_shape,
+                                               anchor_list[img_id], img_shape,
                                                scale_factor, cfg, rescale)
             result_list.append(proposals)
         return result_list
+
+    def refine_bboxes(self, anchor_list, bbox_preds, img_metas):
+        num_levels = len(bbox_preds)
+        new_anchor_list = []
+        for img_id in range(len(img_metas)):
+            mlvl_anchors = []
+            for i in range(num_levels):
+                bbox_pred = bbox_preds[i][img_id].detach()
+                bbox_pred = bbox_pred.permute(1, 2, 0).reshape(-1, 4)
+                img_shape = img_metas[img_id]['img_shape']
+                bboxes = delta2bbox(
+                    anchor_list[img_id][i], bbox_pred, self.target_means,
+                    self.target_stds, img_shape)
+                mlvl_anchors.append(bboxes)
+            new_anchor_list.append(mlvl_anchors)
+        return new_anchor_list
 
     def get_bboxes_single(self,
                           cls_scores,

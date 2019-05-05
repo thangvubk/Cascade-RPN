@@ -18,7 +18,7 @@ model = dict(
         num_outs=5),
     rpn_head=[
         dict(
-            type='RPNHead',
+            type='CascadeRPNHead',
             in_channels=256,
             feat_channels=256,
             anchor_scales=[8],
@@ -33,7 +33,7 @@ model = dict(
             dilation=3,
             gated_feature=True),
         dict(
-            type='RPNHead',
+            type='CascadeRPNHead',
             in_channels=256,
             feat_channels=256,
             anchor_scales=[8],
