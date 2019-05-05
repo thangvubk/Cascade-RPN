@@ -24,12 +24,9 @@ class CascadeRPN(BaseDetector, RPNTestMixin):
         self.num_stages = num_stages
         self.backbone = builder.build_backbone(backbone)
         self.neck = builder.build_neck(neck) if neck is not None else None
-
         self.rpn_head = nn.ModuleList()
         for head in rpn_head:
-            self.rpn_head.append(builder.build_head(rpn_head))
-
-        self.rpn_head = builder.build_head(rpn_head)
+            self.rpn_head.append(builder.build_head(head))
         self.train_cfg = train_cfg
         self.test_cfg = test_cfg
         self.init_weights(pretrained=pretrained)
