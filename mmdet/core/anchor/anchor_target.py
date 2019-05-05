@@ -104,7 +104,7 @@ def ca_anchor_target(anchor_list,
             ignore_region = calc_region(gt_bbox, r2, stride, featmap_size)
             ctr_region = calc_region(gt_bbox, r1, stride, featmap_size)
             ignore_inds = anchor_ctr_inside_region_inds(
-                anchors, stride, ignore_region) 
+                anchors, stride, ignore_region)
             ctr_pos_flags = anchor_ctr_inside_region_flags(
                 anchors, stride, ctr_region)
 
