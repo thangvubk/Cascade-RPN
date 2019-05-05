@@ -5,7 +5,8 @@ from .base import BaseDetector
 from .test_mixins import RPNTestMixin, BBoxTestMixin, MaskTestMixin
 from .. import builder
 from ..registry import DETECTORS
-from mmdet.core import bbox2roi, bbox2result, build_assigner, build_sampler
+from mmdet.core import (bbox2roi, bbox2result, build_assigner, build_sampler,
+                        anchor_offset)
 
 
 @DETECTORS.register_module
@@ -23,7 +24,8 @@ class TwoStageDetector(BaseDetector, RPNTestMixin, BBoxTestMixin,
                  mask_head=None,
                  train_cfg=None,
                  test_cfg=None,
-                 pretrained=None):
+                 pretrained=None,
+                 num_rpn_stages=1):
         super(TwoStageDetector, self).__init__()
         self.backbone = builder.build_backbone(backbone)
 
@@ -34,7 +36,12 @@ class TwoStageDetector(BaseDetector, RPNTestMixin, BBoxTestMixin,
             self.shared_head = builder.build_shared_head(shared_head)
 
         if rpn_head is not None:
-            self.rpn_head = builder.build_head(rpn_head)
+            if self.num_rpn_stages == 1:
+                self.rpn_head = builder.build_head(rpn_head)
+            else:
+                self.rpn_head = nn.ModuleList()
+                for head in rpn_head:
+                    self.rpn_head.append(builder.build_head(rpn_head))
 
         if bbox_head is not None:
             self.bbox_roi_extractor = builder.build_roi_extractor(
@@ -58,7 +65,13 @@ class TwoStageDetector(BaseDetector, RPNTestMixin, BBoxTestMixin,
 
     @property
     def with_rpn(self):
-        return hasattr(self, 'rpn_head') and self.rpn_head is not None
+        return (hasattr(self, 'rpn_head') and self.rpn_head is not None
+                and self.num_rpn_stages == 1)
+
+    @property
+    def with_cascade_rpn(self):
+        return (hasattr(self, 'rpn_head') and self.rpn_head is not None
+                and self.num_rpn_stages > 1)
 
     def init_weights(self, pretrained=None):
         super(TwoStageDetector, self).init_weights(pretrained)
@@ -73,6 +86,9 @@ class TwoStageDetector(BaseDetector, RPNTestMixin, BBoxTestMixin,
             self.shared_head.init_weights(pretrained=pretrained)
         if self.with_rpn:
             self.rpn_head.init_weights()
+        elif self.with_cascade_rpn:
+            for i in range(self.num_rpn_stages):
+                self.rpn_head[i].init_weights()
         if self.with_bbox:
             self.bbox_roi_extractor.init_weights()
             self.bbox_head.init_weights()
@@ -110,6 +126,45 @@ class TwoStageDetector(BaseDetector, RPNTestMixin, BBoxTestMixin,
 
             proposal_inputs = rpn_outs + (img_meta, self.test_cfg.rpn)
             proposal_list = self.rpn_head.get_bboxes(*proposal_inputs)
+
+        elif self.with_cascade_rpn:
+            featmap_sizes = [featmap.size()[-2:] for featmap in x]
+            anchor_list, valid_flag_list = self.rpn_head[0].init_anchors(
+                featmap_sizes, img_meta)
+            losses = dict()
+
+            for i in range(self.num_stages):
+                rpn_train_cfg = self.train_cfg.rpn[i]
+                rpn_head = self.rpn_head[i]
+
+                offset_list = anchor_offset(
+                    anchor_list, rpn_head.anchor_strides, featmap_sizes)
+                # check with_cls and gated_feature
+                if rpn_head.with_cls:
+                    if rpn_head.gated_feature:
+                        x, cls_score, bbox_pred = rpn_head(x, offset_list)
+                    else:
+                        cls_score, bbox_pred = rpn_head(x, offset_list)
+                else:
+                    if rpn_head.gated_feature:
+                        x, bbox_pred = rpn_head(x, offset_list)
+                    else:
+                        bbox_pred = rpn_head(x, offset_list)[0]
+                    cls_score = [None for _ in bbox_pred]
+                rpn_loss_inputs = (
+                    anchor_list, valid_flag_list, cls_score, bbox_pred,
+                    gt_bboxes, img_meta, rpn_train_cfg)
+                stage_loss = rpn_head.loss(*rpn_loss_inputs)
+                for name, value in stage_loss.items():
+                    losses['s{}.{}'.format(i, name)] = value
+
+                # refine boxes
+                if i < self.num_stages - 1:
+                    anchor_list = rpn_head.refine_bboxes(
+                        anchor_list, bbox_pred, img_meta)
+            proposal_list = self.rpn_head[-1].get_bboxes(
+                anchor_list, cls_score, bbox_pred, img_meta, self.test_cfg.rpn)
+
         else:
             proposal_list = proposals
 
@@ -193,8 +248,34 @@ class TwoStageDetector(BaseDetector, RPNTestMixin, BBoxTestMixin,
 
         x = self.extract_feat(img)
 
-        proposal_list = self.simple_test_rpn(
-            x, img_meta, self.test_cfg.rpn) if proposals is None else proposals
+        if self.with_rpn:
+            proposal_list = self.simple_test_rpn(
+                x, img_meta, self.test_cfg.rpn)
+        elif self.with_cascade_rpn:
+            featmap_sizes = [featmap.size()[-2:] for featmap in x]
+            anchor_list, _ = self.rpn_head[0].init_anchors(
+                featmap_sizes, img_meta)
+            for i in range(self.num_stages):
+                rpn_head = self.rpn_head[i]
+                offset_list = anchor_offset(
+                    anchor_list, rpn_head.anchor_strides, featmap_sizes)
+                if rpn_head.with_cls:
+                    if rpn_head.gated_feature:
+                        x, cls_score, bbox_pred = rpn_head(x, offset_list)
+                    else:
+                        cls_score, bbox_pred = rpn_head(x, offset_list)
+                else:
+                    if rpn_head.gated_feature:
+                        x, bbox_pred = rpn_head(x, offset_list)
+                    else:
+                        bbox_pred = rpn_head(x, offset_list)[0]
+                if i < self.num_stages - 1:
+                    anchor_list = rpn_head.refine_bboxes(
+                        anchor_list, bbox_pred, img_meta)
+            proposal_list = self.rpn_head[-1].get_bboxes(
+                anchor_list, cls_score, bbox_pred, img_meta, self.test_cfg.rpn)
+        else:
+            proposal_list = proposals
 
         det_bboxes, det_labels = self.simple_test_bboxes(
             x, img_meta, proposal_list, self.test_cfg.rcnn, rescale=rescale)
@@ -214,6 +295,8 @@ class TwoStageDetector(BaseDetector, RPNTestMixin, BBoxTestMixin,
         If rescale is False, then returned bboxes and masks will fit the scale
         of imgs[0].
         """
+        if self.with_cascade_rpn:
+            raise NotImplementedError
         # recompute feats to save memory
         proposal_list = self.aug_test_rpn(
             self.extract_feats(imgs), img_metas, self.test_cfg.rpn)
