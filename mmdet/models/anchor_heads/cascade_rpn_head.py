@@ -5,13 +5,13 @@ from mmcv.cnn import normal_init
 
 from mmdet.core import delta2bbox
 from mmdet.ops import nms, DeformConv
-from .anchor_head import AnchorHead
+from .cascade_anchor_head import CascadeAnchorHead
 from ..registry import HEADS
 from ..utils import bias_init_with_prob
 
 
 @HEADS.register_module
-class CascadeRPNHead(AnchorHead):
+class CascadeRPNHead(CascadeAnchorHead):
 
     def __init__(self, in_channels, feat_adapt=False, dilation=1,
                  gated_feature=False, **kwargs):
