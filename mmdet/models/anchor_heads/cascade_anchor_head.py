@@ -42,7 +42,7 @@ class CascadeAnchorHead(nn.Module):
                  target_stds=(1.0, 1.0, 1.0, 1.0),
                  use_sigmoid_cls=False,
                  use_focal_loss=False,
-                 scale_fp_suppress=False,
+                 mix_iou_region=True,
                  with_cls=True):
         super(CascadeAnchorHead, self).__init__()
         self.in_channels = in_channels
@@ -57,7 +57,7 @@ class CascadeAnchorHead(nn.Module):
         self.target_stds = target_stds
         self.use_sigmoid_cls = use_sigmoid_cls
         self.use_focal_loss = use_focal_loss
-        self.scale_fp_suppress = scale_fp_suppress
+        self.mix_iou_region = mix_iou_region
         self.with_cls = with_cls
 
         self.anchor_generators = []
@@ -191,7 +191,7 @@ class CascadeAnchorHead(nn.Module):
             raise Exception('Unknown config {}'.format(bbox_loss_cfg.type))
         if self.with_cls:
             return loss_cls, loss_reg
-        return None, loss_reg,
+        return None, loss_reg
 
     def loss(self,
              anchor_list,
@@ -206,21 +206,22 @@ class CascadeAnchorHead(nn.Module):
         featmap_sizes = [featmap.size()[-2:] for featmap in bbox_preds]
         sampling = False if self.use_focal_loss else True
         label_channels = self.cls_out_channels if self.use_sigmoid_cls else 1
-        if self.scale_fp_suppress:
+        if self.mix_iou_region:
             cls_reg_targets = ca_anchor_target(
                 anchor_list,
+                valid_flag_list,
                 gt_bboxes,
+                img_metas,
                 featmap_sizes,
                 self.anchor_scales[0],
                 self.anchor_strides,
                 self.target_means,
                 self.target_stds,
                 cfg,
-                label_channels=label_channels)
-            if cls_reg_targets is None:
-                return None
-            (labels_list, label_weights_list, bbox_targets_list,
-             bbox_weights_list, rois_list, num_total_samples) = cls_reg_targets
+                gt_bboxes_ignore_list=gt_bboxes_ignore,
+                gt_labels_list=gt_labels,
+                label_channels=label_channels,
+                sampling=sampling)
         else:
             cls_reg_targets = anchor_target(
                 anchor_list,
@@ -234,13 +235,13 @@ class CascadeAnchorHead(nn.Module):
                 gt_labels_list=gt_labels,
                 label_channels=label_channels,
                 sampling=sampling)
-            if cls_reg_targets is None:
-                return None
-            (labels_list, label_weights_list, bbox_targets_list,
-             bbox_weights_list, rois_list, num_total_pos, num_total_neg
-             ) = cls_reg_targets
-            num_total_samples = (num_total_pos if self.use_focal_loss else
-                                 num_total_pos + num_total_neg)
+        if cls_reg_targets is None:
+            return None
+        (labels_list, label_weights_list, bbox_targets_list,
+         bbox_weights_list, rois_list, num_total_pos, num_total_neg
+         ) = cls_reg_targets
+        num_total_samples = (num_total_pos if self.use_focal_loss else
+                             num_total_pos + num_total_neg)
         losses = multi_apply(
             self.loss_single,
             cls_scores,
