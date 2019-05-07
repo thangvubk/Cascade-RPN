@@ -44,7 +44,7 @@ def anchor_outside_flags(flat_anchors, valid_flags, img_shape,
     return outside_flags
 
 
-class MaxIoUAssigner(BaseAssigner):
+class MixIoURegionAnchorAssigner(BaseAssigner):
     """Assign a corresponding gt bbox or background to each bbox.
 
     Each proposals will be assigned with `-1`, `0`, or a positive integer
@@ -172,9 +172,9 @@ class MaxIoUAssigner(BaseAssigner):
                     anchors, stride, ctr_region)
                 pos_flags = region_pos_flags & pos_flags
             if self.with_iou:
-                iou_pos_flags = overlaps > self.pos_iou_thr
+                iou_pos_flags = overlaps >= self.pos_iou_thr
                 max_overlap = overlaps.max()
-                if max_overlap > self.min_pos_iou:
+                if max_overlap >= self.min_pos_iou:
                     max_iou_flags = overlaps == max_overlap
                     iou_pos_flags |= max_iou_flags
                 pos_flags = iou_pos_flags & pos_flags
