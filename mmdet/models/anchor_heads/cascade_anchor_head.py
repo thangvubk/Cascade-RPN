@@ -8,7 +8,7 @@ from mmdet.core import (AnchorGenerator, anchor_target, delta2bbox,
                         multi_apply, weighted_cross_entropy, weighted_smoothl1,
                         weighted_binary_cross_entropy,
                         weighted_sigmoid_focal_loss, multiclass_nms,
-                        iou_loss, giou_loss, ca_anchor_target)
+                        iou_loss, giou_loss, region_anchor_target)
 from ..registry import HEADS
 
 
@@ -42,7 +42,6 @@ class CascadeAnchorHead(nn.Module):
                  target_stds=(1.0, 1.0, 1.0, 1.0),
                  use_sigmoid_cls=False,
                  use_focal_loss=False,
-                 mix_iou_region=True,
                  with_cls=True,
                  sampling=True):
         super(CascadeAnchorHead, self).__init__()
@@ -58,7 +57,6 @@ class CascadeAnchorHead(nn.Module):
         self.target_stds = target_stds
         self.use_sigmoid_cls = use_sigmoid_cls
         self.use_focal_loss = use_focal_loss
-        self.mix_iou_region = mix_iou_region
         self.with_cls = with_cls
         self.sampling = sampling
         if use_focal_loss:
@@ -211,8 +209,9 @@ class CascadeAnchorHead(nn.Module):
              gt_bboxes_ignore=None):
         featmap_sizes = [featmap.size()[-2:] for featmap in bbox_preds]
         label_channels = self.cls_out_channels if self.use_sigmoid_cls else 1
-        if self.mix_iou_region:
-            cls_reg_targets = ca_anchor_target(
+        assigner_type = cfg.assigner['type']
+        if assigner_type == 'RegionAssigner':
+            cls_reg_targets = region_anchor_target(
                 anchor_list,
                 valid_flag_list,
                 gt_bboxes,

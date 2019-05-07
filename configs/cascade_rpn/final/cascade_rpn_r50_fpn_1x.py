@@ -49,9 +49,7 @@ train_cfg = dict(
     rpn=[
         dict(
             assigner=dict(
-                type='MixIoURegionAnchorAssigner',
-                with_region=True,
-                with_iou=False,
+                type='RegionAssigner',
                 center_ratio=0.2,
                 ignore_ratio=0.5),
             allowed_border=-1,

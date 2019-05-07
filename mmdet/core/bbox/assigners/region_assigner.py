@@ -2,7 +2,6 @@ import torch
 
 from .base_assigner import BaseAssigner
 from .assign_result import AssignResult
-from ..geometry import bbox_overlaps
 
 
 def calc_region(bbox, ratio, stride, featmap_size=None):
@@ -44,7 +43,7 @@ def anchor_outside_flags(flat_anchors, valid_flags, img_shape,
     return outside_flags
 
 
-class MixIoURegionAnchorAssigner(BaseAssigner):
+class RegionAssigner(BaseAssigner):
     """Assign a corresponding gt bbox or background to each bbox.
 
     Each proposals will be assigned with `-1`, `0`, or a positive integer
@@ -61,23 +60,12 @@ class MixIoURegionAnchorAssigner(BaseAssigner):
             positive bbox. Positive samples can have smaller IoU than
             pos_iou_thr due to the 4th step (assign max IoU sample to each gt).
     """
-    # TODO add docs
+    # TODO update docs
     def __init__(self,
-                 with_region=True,
-                 with_iou=True,
                  center_ratio=0.2,
-                 ignore_ratio=0.5,
-                 pos_iou_thr=0.7,
-                 neg_iou_thr=0.7,
-                 min_pos_iou=0.3):
-        assert with_region or with_iou
-        self.with_region = with_region
-        self.with_iou = with_iou
+                 ignore_ratio=0.5):
         self.center_ratio = center_ratio
         self.ignore_ratio = ignore_ratio
-        self.pos_iou_thr = pos_iou_thr
-        self.neg_iou_thr = neg_iou_thr
-        self.min_pos_iou = min_pos_iou
 
     def assign(self, mlvl_anchors, mlvl_valid_flags, gt_bboxes, img_meta,
                featmap_sizes, anchor_scale, anchor_strides,
@@ -92,9 +80,9 @@ class MixIoURegionAnchorAssigner(BaseAssigner):
 
         1. Assign every anchor to 0 (negative)
         For each gt_bboxes:
-            2. Compute ignore flags based on ignore_region and iou_thr then
+            2. Compute ignore flags based on ignore_region then
                 assign -1 to anchors w.r.t. ignore flags
-            3. Compute pos flags based on center_region and pos_iou_thr then
+            3. Compute pos flags based on center_region then
                assign gt_bboxes to anchors w.r.t. pos flags
             4. Compute ignore flags based on adjacent anchor lvl then
                assign -1 to anchors w.r.t. ignore flags
@@ -111,6 +99,8 @@ class MixIoURegionAnchorAssigner(BaseAssigner):
             :obj:`AssignResult`: The assign result.
         """
         # TODO support gt_bboxes_ignore
+        if gt_bboxes_ignore is not None:
+            raise NotImplementedError
         if gt_bboxes.shape[0] == 0:
             raise ValueError('No gt bboxes')
         num_gts = gt_bboxes.shape[0]
@@ -145,71 +135,46 @@ class MixIoURegionAnchorAssigner(BaseAssigner):
             anchors = mlvl_anchors[lvl]
             gt_bbox = gt_bboxes[gt_id, :4]
 
-            # Compute regions and iou overlaps
-            if self.with_region:
-                ignore_region = calc_region(gt_bbox, r2, stride, featmap_size)
-                ctr_region = calc_region(gt_bbox, r1, stride, featmap_size)
-            if self.with_iou:
-                overlaps = bbox_overlaps(gt_bbox[None, :], anchors).squeeze(0)
+            # Compute regions
+            ignore_region = calc_region(gt_bbox, r2, stride, featmap_size)
+            ctr_region = calc_region(gt_bbox, r1, stride, featmap_size)
 
-            # 2. Assign -1 to ignore inds
-            ignore_flags = 1
-            if self.with_region:
-                region_ignore_flags = anchor_ctr_inside_region_flags(
-                    anchors, stride, ignore_region)
-                ignore_flags = region_ignore_flags & ignore_flags
-            if self.with_iou:
-                # neg_iou_thr <= ignore_iou < pos_iou_thr
-                iou_ignore_flags = overlaps < self.pos_iou_thr
-                iou_ignore_flags &= (overlaps >= self.neg_iou_thr)
-                ignore_flags = iou_ignore_flags & ignore_flags
+            # 2. Assign -1 to ignore flags
+            ignore_flags = anchor_ctr_inside_region_flags(
+                anchors, stride, ignore_region)
             mlvl_assigned_gt_inds[lvl][ignore_flags > 0] = -1
 
-            # 3. Assign gt_bboxes to pos inds
-            # TODO: check potential bug that gt_id is not max overlap
-            # due to override, and mismatch in pos_iou_thr
-            pos_flags = 1
-            if self.with_region:
-                region_pos_flags = anchor_ctr_inside_region_flags(
-                    anchors, stride, ctr_region)
-                pos_flags = region_pos_flags & pos_flags
-            if self.with_iou:
-                iou_pos_flags = overlaps >= self.pos_iou_thr
-                max_overlap = overlaps.max()
-                if max_overlap >= self.min_pos_iou:
-                    max_iou_flags = overlaps == max_overlap
-                    iou_pos_flags |= max_iou_flags
-                pos_flags = iou_pos_flags & pos_flags
+            # 3. Assign gt_bboxes to pos flags
+            pos_flags = anchor_ctr_inside_region_flags(
+                anchors, stride, ctr_region)
             mlvl_assigned_gt_inds[lvl][pos_flags > 0] = gt_id + 1
 
             # 4. Assign -1 to ignore adjacent lvl
-            if self.with_region:
-                if lvl > 0:
-                    d_lvl = lvl - 1
-                    d_anchors = mlvl_anchors[d_lvl]
-                    d_featmap_size = featmap_sizes[d_lvl]
-                    d_stride = anchor_strides[d_lvl]
-                    d_ignore_region = calc_region(
-                        gt_bbox, d_stride, r2, d_featmap_size)
-                    ignore_flags = anchor_ctr_inside_region_flags(
-                        d_anchors, d_stride, d_ignore_region)
-                    mlvl_ignore_flags[d_lvl][ignore_flags > 0] = 1
-                if lvl < num_lvls - 1:
-                    u_lvl = lvl + 1
-                    u_anchors = mlvl_anchors[u_lvl]
-                    u_featmap_size = featmap_sizes[u_lvl]
-                    u_stride = anchor_strides[u_lvl]
-                    u_ignore_region = calc_region(
-                        gt_bbox, u_stride, r2, u_featmap_size)
-                    ignore_flags = anchor_ctr_inside_region_flags(
-                        u_anchors, u_stride, u_ignore_region)
-                    mlvl_ignore_flags[u_lvl][ignore_flags > 0] = 1
+            if lvl > 0:
+                d_lvl = lvl - 1
+                d_anchors = mlvl_anchors[d_lvl]
+                d_featmap_size = featmap_sizes[d_lvl]
+                d_stride = anchor_strides[d_lvl]
+                d_ignore_region = calc_region(
+                    gt_bbox, d_stride, r2, d_featmap_size)
+                ignore_flags = anchor_ctr_inside_region_flags(
+                    d_anchors, d_stride, d_ignore_region)
+                mlvl_ignore_flags[d_lvl][ignore_flags > 0] = 1
+            if lvl < num_lvls - 1:
+                u_lvl = lvl + 1
+                u_anchors = mlvl_anchors[u_lvl]
+                u_featmap_size = featmap_sizes[u_lvl]
+                u_stride = anchor_strides[u_lvl]
+                u_ignore_region = calc_region(
+                    gt_bbox, u_stride, r2, u_featmap_size)
+                ignore_flags = anchor_ctr_inside_region_flags(
+                    u_anchors, u_stride, u_ignore_region)
+                mlvl_ignore_flags[u_lvl][ignore_flags > 0] = 1
 
         # 4. (cont.) Assign -1 to ignore adjacent lvl
-        if self.with_region:
-            for lvl in range(num_lvls):
-                ignore_flags = mlvl_ignore_flags[lvl]
-                mlvl_assigned_gt_inds[lvl][ignore_flags > 0] = -1
+        for lvl in range(num_lvls):
+            ignore_flags = mlvl_ignore_flags[lvl]
+            mlvl_assigned_gt_inds[lvl][ignore_flags > 0] = -1
 
         # 5. Assign -1 to anchor outside of image
         flat_assigned_gt_inds = torch.cat(mlvl_assigned_gt_inds)
@@ -224,9 +189,9 @@ class MixIoURegionAnchorAssigner(BaseAssigner):
 
         if gt_labels is not None:
             assigned_labels = torch.zeros_like(flat_assigned_gt_inds)
-            pos_inds = assigned_gt_inds > 0
-            assigned_labels[pos_inds] = gt_labels[
-                flat_assigned_gt_inds[pos_inds] - 1]
+            pos_flags = assigned_gt_inds > 0
+            assigned_labels[pos_flags] = gt_labels[
+                flat_assigned_gt_inds[pos_flags] - 1]
         else:
             assigned_labels = None
 
