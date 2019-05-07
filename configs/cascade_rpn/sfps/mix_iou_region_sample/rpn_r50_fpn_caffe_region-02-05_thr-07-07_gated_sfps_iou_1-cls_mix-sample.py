@@ -30,7 +30,8 @@ model = dict(
             with_cls=False,
             feat_adapt=False,
             dilation=3,
-            gated_feature=True),
+            gated_feature=True,
+            sampling=False),
         dict(
             type='CascadeRPNHead',
             in_channels=256,
@@ -50,7 +51,7 @@ train_cfg = dict(
     rpn=[
         dict(
             assigner=dict(
-                type='MaxIoUAssigner',
+                type='MixIoURegionAnchorAssigner',
                 with_region=True,
                 with_iou=False,
                 center_ratio=0.2,
@@ -61,13 +62,13 @@ train_cfg = dict(
                 pos_fraction=0.5,
                 neg_pos_ub=-1,
                 add_gt_as_proposals=False),
-            allowed_border=0,
+            allowed_border=-1,
             pos_weight=-1,
             bbox_loss=dict(type='IoU', reg_ratio=10),
             debug=False),
         dict(
             assigner=dict(
-                type='MaxIoUAssigner',
+                type='MixIoURegionAnchorAssigner',
                 with_region=False,
                 with_iou=True,
                 pos_iou_thr=0.7,
@@ -79,11 +80,11 @@ train_cfg = dict(
                 pos_fraction=0.5,
                 neg_pos_ub=-1,
                 add_gt_as_proposals=False),
-            allowed_border=0,
+            allowed_border=-1,
             pos_weight=-1,
             bbox_loss=dict(type='IoU', reg_ratio=10),
-            debug=False)
-    ])
+            debug=False)],
+    rpn_stage_loss_weights=[1, 1])
 test_cfg = dict(
     rpn=dict(
         nms_across_levels=False,

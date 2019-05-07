@@ -80,6 +80,7 @@ class CascadeRPNHead(CascadeAnchorHead):
              gt_bboxes,
              img_metas,
              cfg,
+             loss_weight=1,
              gt_bboxes_ignore=None):
         losses = super(CascadeRPNHead, self).loss(
             anchor_list,
@@ -90,6 +91,7 @@ class CascadeRPNHead(CascadeAnchorHead):
             None,
             img_metas,
             cfg,
+            loss_weight=loss_weight,
             gt_bboxes_ignore=gt_bboxes_ignore)
         if self.with_cls:
             return dict(
