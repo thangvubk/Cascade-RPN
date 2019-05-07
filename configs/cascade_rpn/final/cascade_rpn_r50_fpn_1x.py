@@ -28,9 +28,8 @@ model = dict(
             target_stds=[0.11, 0.11, 0.33, 0.33],
             # args for cascade_rpn
             with_cls=False,
-            feat_adapt=False,
             dilation=3,
-            gated_feature=True,
+            bridged_feature=True,
             sampling=False),
         dict(
             type='CascadeRPNHead',
@@ -43,7 +42,6 @@ model = dict(
             target_stds=[0.11, 0.11, 0.33, 0.33],
             # args for cascade_rpn
             use_sigmoid_cls=True,
-            use_focal_loss=False,
             feat_adapt=True)
     ])
 # model training and testing settings

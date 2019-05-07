@@ -59,14 +59,14 @@ class CascadeRPN(BaseDetector, RPNTestMixin):
 
             offset_list = anchor_offset(
                 anchor_list, rpn_head.anchor_strides, featmap_sizes)
-            # check with_cls and gated_feature
+            # check with_cls and bridged_feature
             if rpn_head.with_cls:
-                if rpn_head.gated_feature:
+                if rpn_head.bridged_feature:
                     x, cls_score, bbox_pred = rpn_head(x, offset_list)
                 else:
                     cls_score, bbox_pred = rpn_head(x, offset_list)
             else:
-                if rpn_head.gated_feature:
+                if rpn_head.bridged_feature:
                     x, bbox_pred = rpn_head(x, offset_list)
                 else:
                     bbox_pred = rpn_head(x, offset_list)[0]  # returned tupple
@@ -94,12 +94,12 @@ class CascadeRPN(BaseDetector, RPNTestMixin):
             offset_list = anchor_offset(
                 anchor_list, rpn_head.anchor_strides, featmap_sizes)
             if rpn_head.with_cls:
-                if rpn_head.gated_feature:
+                if rpn_head.bridged_feature:
                     x, cls_score, bbox_pred = rpn_head(x, offset_list)
                 else:
                     cls_score, bbox_pred = rpn_head(x, offset_list)
             else:
-                if rpn_head.gated_feature:
+                if rpn_head.bridged_feature:
                     x, bbox_pred = rpn_head(x, offset_list)
                 else:
                     bbox_pred = rpn_head(x, offset_list)[0]  # returned tupple

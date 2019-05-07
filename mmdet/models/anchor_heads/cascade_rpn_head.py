@@ -14,11 +14,11 @@ from ..utils import bias_init_with_prob
 class CascadeRPNHead(CascadeAnchorHead):
 
     def __init__(self, in_channels, feat_adapt=False, dilation=1,
-                 gated_feature=False, **kwargs):
+                 bridged_feature=False, **kwargs):
         super(CascadeRPNHead, self).__init__(2, in_channels, **kwargs)
         self.feat_adapt = feat_adapt
         self.dilation = dilation
-        self.gated_feature = gated_feature
+        self.bridged_feature = bridged_feature
         self._init_layers()
 
     def _init_layers(self):
@@ -63,7 +63,7 @@ class CascadeRPNHead(CascadeAnchorHead):
             x = self.rpn_conv(x)
         x = F.relu(x, inplace=True)
         out = ()
-        if self.gated_feature:
+        if self.bridged_feature:
             out = out + (x,)
         if self.with_cls:
             rpn_cls_score = self.rpn_cls(x)
