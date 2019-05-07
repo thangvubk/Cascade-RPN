@@ -56,24 +56,17 @@ train_cfg = dict(
                 with_iou=False,
                 center_ratio=0.2,
                 ignore_ratio=0.5),
-            sampler=dict(
-                type='RandomSampler',
-                num=256,
-                pos_fraction=0.5,
-                neg_pos_ub=-1,
-                add_gt_as_proposals=False),
             allowed_border=-1,
             pos_weight=-1,
             bbox_loss=dict(type='IoU', reg_ratio=10),
             debug=False),
         dict(
             assigner=dict(
-                type='MixIoURegionAnchorAssigner',
-                with_region=False,
-                with_iou=True,
+                type='MaxIoUAssigner',
                 pos_iou_thr=0.7,
                 neg_iou_thr=0.7,
-                min_pos_iou=0.3),
+                min_pos_iou=0.3,
+                ignore_iof_thr=-1),
             sampler=dict(
                 type='RandomSampler',
                 num=256,
