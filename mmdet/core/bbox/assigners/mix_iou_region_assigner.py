@@ -166,6 +166,8 @@ class MixIoURegionAnchorAssigner(BaseAssigner):
             mlvl_assigned_gt_inds[lvl][ignore_flags > 0] = -1
 
             # 3. Assign gt_bboxes to pos inds
+            # TODO: check potential bug that gt_id is not max overlap
+            # due to override, and mismatch in pos_iou_thr
             pos_flags = 1
             if self.with_region:
                 region_pos_flags = anchor_ctr_inside_region_flags(
