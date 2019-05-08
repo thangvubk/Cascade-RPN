@@ -28,10 +28,9 @@ model = dict(
             target_stds=[0.11, 0.11, 0.33, 0.33],
             # args for cascade_rpn
             with_cls=False,
-            scale_fp_suppress=True,
-            feat_adapt=False,
             dilation=3,
-            gated_feature=True),
+            bridged_feature=True,
+            sampling=False),
         dict(
             type='CascadeRPNHead',
             in_channels=256,
@@ -43,8 +42,6 @@ model = dict(
             target_stds=[0.11, 0.11, 0.33, 0.33],
             # args for cascade_rpn
             use_sigmoid_cls=True,
-            use_focal_loss=False,
-            scale_fp_suppress=False,
             feat_adapt=True)],
     bbox_roi_extractor=dict(
         type='SingleRoIExtractor',
@@ -59,23 +56,19 @@ model = dict(
         roi_feat_size=7,
         num_classes=81,
         target_means=[0., 0., 0., 0.],
-        target_stds=[0.1, 0.1, 0.2, 0.2],
+        target_stds=[0.05, 0.05, 0.1, 0.1],
         reg_class_agnostic=False))
 # model training and testing settings
 train_cfg = dict(
     rpn=[
         dict(
-            pos_iou_thr=0,
-            min_pos_iou=0,
-            center_ratio=0.2,
-            ignore_ratio=0.5,
-            with_iou=False,
-            allowed_border=0,  # TODO check this arg
+            assigner=dict(
+                type='RegionAssigner',
+                center_ratio=0.2,
+                ignore_ratio=0.5),
+            allowed_border=-1,
             pos_weight=-1,
             bbox_loss=dict(type='IoU', reg_ratio=10),
-            smoothl1_beta=1 / 9.0,
-            gamma=2.0,
-            alpha=0.25,
             debug=False),
         dict(
             assigner=dict(
@@ -90,18 +83,11 @@ train_cfg = dict(
                 pos_fraction=0.5,
                 neg_pos_ub=-1,
                 add_gt_as_proposals=False),
-            # pos_iou_thr=0.7,
-            # min_pos_iou=0.3,
-            # center_ratio=0.01,
-            # ignore_ratio=0.01,
-            # with_iou=True,
-            allowed_border=0,
+            allowed_border=-1,
             pos_weight=-1,
             bbox_loss=dict(type='IoU', reg_ratio=10),
-            # smoothl1_beta=1 / 9.0,
-            # gamma=2.0,
-            # alpha=0.25,
             debug=False)],
+    rpn_stage_loss_weights=[1, 1],
     rcnn=dict(
         assigner=dict(
             type='MaxIoUAssigner',
@@ -111,7 +97,7 @@ train_cfg = dict(
             ignore_iof_thr=-1),
         sampler=dict(
             type='RandomSampler',
-            num=512,
+            num=256,
             pos_fraction=0.25,
             neg_pos_ub=-1,
             add_gt_as_proposals=True),
@@ -122,11 +108,11 @@ test_cfg = dict(
         nms_across_levels=False,
         nms_pre=2000,
         nms_post=2000,
-        max_num=2000,
+        max_num=300,
         nms_thr=0.7,
         min_bbox_size=0),
     rcnn=dict(
-        score_thr=0.05, nms=dict(type='nms', iou_thr=0.5), max_per_img=100)
+        score_thr=0.001, nms=dict(type='nms', iou_thr=0.5), max_per_img=100)
     # soft-nms is also supported for rcnn testing
     # e.g., nms=dict(type='soft_nms', iou_thr=0.5, min_score=0.05)
 )
