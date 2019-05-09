@@ -25,7 +25,7 @@ model = dict(
             anchor_ratios=[1.0],
             anchor_strides=[4, 8, 16, 32, 64],
             target_means=[.0, .0, .0, .0],
-            target_stds=[0.11, 0.11, 0.33, 0.33],
+            target_stds=[0.1, 0.1, 0.5, 0.5],
             # args for cascade_rpn
             with_cls=False,
             dilation=3,
@@ -39,7 +39,7 @@ model = dict(
             anchor_ratios=[1.0],
             anchor_strides=[4, 8, 16, 32, 64],
             target_means=[.0, .0, .0, .0],
-            target_stds=[0.11, 0.11, 0.33, 0.33],
+            target_stds=[0.05, 0.05, 0.1, 0.1],
             # args for cascade_rpn
             use_sigmoid_cls=True,
             feat_adapt=True)
