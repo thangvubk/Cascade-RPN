@@ -56,7 +56,7 @@ model = dict(
         roi_feat_size=7,
         num_classes=81,
         target_means=[0., 0., 0., 0.],
-        target_stds=[0.05, 0.05, 0.1, 0.1],
+        target_stds=[0.1, 0.1, 0.15, 0.15],
         reg_class_agnostic=False))
 # model training and testing settings
 train_cfg = dict(
