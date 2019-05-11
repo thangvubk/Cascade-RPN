@@ -58,8 +58,11 @@ class CascadeRPN(BaseDetector, RPNTestMixin):
             rpn_head = self.rpn_head[i]
             lw = self.train_cfg.rpn_stage_loss_weights[i]
 
-            offset_list = anchor_offset(
-                anchor_list, rpn_head.anchor_strides, featmap_sizes)
+            if i == 0:
+                offset_list = None
+            else:
+                offset_list = anchor_offset(
+                    anchor_list, rpn_head.anchor_strides, featmap_sizes)
             # check with_cls and bridged_feature
             if rpn_head.with_cls:
                 if rpn_head.bridged_feature:
@@ -91,8 +94,11 @@ class CascadeRPN(BaseDetector, RPNTestMixin):
 
         for i in range(self.num_stages):
             rpn_head = self.rpn_head[i]
-            offset_list = anchor_offset(
-                anchor_list, rpn_head.anchor_strides, featmap_sizes)
+            if i == 0:
+                offset_list = None
+            else:
+                offset_list = anchor_offset(
+                    anchor_list, rpn_head.anchor_strides, featmap_sizes)
             if rpn_head.with_cls:
                 if rpn_head.bridged_feature:
                     x, cls_score, bbox_pred = rpn_head(x, offset_list)
