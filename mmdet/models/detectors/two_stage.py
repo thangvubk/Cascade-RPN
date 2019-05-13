@@ -137,6 +137,7 @@ class TwoStageDetector(BaseDetector, RPNTestMixin, BBoxTestMixin,
             for i in range(self.num_rpn_stages):
                 rpn_train_cfg = self.train_cfg.rpn[i]
                 rpn_head = self.rpn_head[i]
+                lw = self.train_cfg.rpn_stage_loss_weights[i]
 
                 offset_list = anchor_offset(
                     anchor_list, rpn_head.anchor_strides, featmap_sizes)
@@ -154,7 +155,7 @@ class TwoStageDetector(BaseDetector, RPNTestMixin, BBoxTestMixin,
                     cls_score = [None for _ in bbox_pred]
                 rpn_loss_inputs = (
                     anchor_list, valid_flag_list, cls_score, bbox_pred,
-                    gt_bboxes, img_meta, rpn_train_cfg)
+                    gt_bboxes, img_meta, rpn_train_cfg, lw)
                 stage_loss = rpn_head.loss(*rpn_loss_inputs)
                 for name, value in stage_loss.items():
                     losses['s{}.{}'.format(i, name)] = value
