@@ -80,7 +80,7 @@ test_cfg = dict(
         nms_pre=2000,
         nms_post=2000,
         max_num=2000,
-        nms_thr=0.7,
+        nms_thr=0.8,
         min_bbox_size=0))
 # dataset settings
 dataset_type = 'CocoDataset'
