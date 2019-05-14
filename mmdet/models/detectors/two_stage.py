@@ -132,15 +132,17 @@ class TwoStageDetector(BaseDetector, RPNTestMixin, BBoxTestMixin,
             featmap_sizes = [featmap.size()[-2:] for featmap in x]
             anchor_list, valid_flag_list = self.rpn_head[0].init_anchors(
                 featmap_sizes, img_meta)
-            losses = dict()
 
             for i in range(self.num_rpn_stages):
                 rpn_train_cfg = self.train_cfg.rpn[i]
                 rpn_head = self.rpn_head[i]
                 lw = self.train_cfg.rpn_stage_loss_weights[i]
 
-                offset_list = anchor_offset(
-                    anchor_list, rpn_head.anchor_strides, featmap_sizes)
+                if i == 0:
+                    offset_list = None
+                else:
+                    offset_list = anchor_offset(
+                        anchor_list, rpn_head.anchor_strides, featmap_sizes)
                 # check with_cls and bridged_feature
                 if rpn_head.with_cls:
                     if rpn_head.bridged_feature:
@@ -259,8 +261,11 @@ class TwoStageDetector(BaseDetector, RPNTestMixin, BBoxTestMixin,
                 featmap_sizes, img_meta)
             for i in range(self.num_rpn_stages):
                 rpn_head = self.rpn_head[i]
-                offset_list = anchor_offset(
-                    anchor_list, rpn_head.anchor_strides, featmap_sizes)
+                if i == 0:
+                    offset_list = None
+                else:
+                    offset_list = anchor_offset(
+                        anchor_list, rpn_head.anchor_strides, featmap_sizes)
                 if rpn_head.with_cls:
                     if rpn_head.bridged_feature:
                         x, cls_score, bbox_pred = rpn_head(x, offset_list)
