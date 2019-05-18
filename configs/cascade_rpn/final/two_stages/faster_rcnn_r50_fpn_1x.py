@@ -56,7 +56,7 @@ model = dict(
         roi_feat_size=7,
         num_classes=81,
         target_means=[0., 0., 0., 0.],
-        target_stds=[0.1, 0.1, 0.15, 0.15],
+        target_stds=[0.04, 0.04, 0.08, 0.08],
         reg_class_agnostic=False))
 # model training and testing settings
 train_cfg = dict(
@@ -87,13 +87,13 @@ train_cfg = dict(
             pos_weight=-1,
             bbox_loss=dict(type='IoU', reg_ratio=10),
             debug=False)],
-    rpn_stage_loss_weights=[1, 1],
+    rpn_stage_loss_weights=[0.7, 0.7],
     rcnn=dict(
         assigner=dict(
             type='MaxIoUAssigner',
-            pos_iou_thr=0.6,
-            neg_iou_thr=0.6,
-            min_pos_iou=0.6,
+            pos_iou_thr=0.65,
+            neg_iou_thr=0.65,
+            min_pos_iou=0.65,
             ignore_iof_thr=-1),
         sampler=dict(
             type='RandomSampler',
@@ -109,7 +109,7 @@ test_cfg = dict(
         nms_pre=2000,
         nms_post=2000,
         max_num=300,
-        nms_thr=0.7,
+        nms_thr=0.8,
         min_bbox_size=0),
     rcnn=dict(
         score_thr=0.001, nms=dict(type='nms', iou_thr=0.5), max_per_img=100)
