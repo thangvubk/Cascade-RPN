@@ -90,7 +90,8 @@ class BBoxHead(nn.Module):
              reduce=True):
         losses = dict()
         if cls_score is not None:
-            losses['loss_cls'] = weighted_cross_entropy(
+            # TODO: Update weight to configs
+            losses['loss_cls'] = 1.5 * weighted_cross_entropy(
                 cls_score, labels, label_weights, reduce=reduce)
             losses['acc'] = accuracy(cls_score, labels)
         if bbox_pred is not None:
