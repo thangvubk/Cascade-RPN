@@ -62,7 +62,8 @@ train_cfg = dict(
                 add_gt_as_proposals=False),
             allowed_border=-1,
             pos_weight=-1,
-            bbox_loss=dict(type='IoU', reg_ratio=10),
+            smoothl1_beta=1 / 9.0,
+            # bbox_loss=dict(type='IoU', reg_ratio=10),
             debug=False),
         dict(
             assigner=dict(
@@ -79,7 +80,8 @@ train_cfg = dict(
                 add_gt_as_proposals=False),
             allowed_border=-1,
             pos_weight=-1,
-            bbox_loss=dict(type='IoU', reg_ratio=10),
+            smoothl1_beta=1 / 9.0,
+            # bbox_loss=dict(type='IoU', reg_ratio=10),
             debug=False)],
     rpn_stage_loss_weights=[1, 1])
 test_cfg = dict(
