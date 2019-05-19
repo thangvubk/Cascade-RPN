@@ -9,7 +9,6 @@ model = dict(
         out_indices=(0, 1, 2, 3),
         frozen_stages=1,
         normalize=dict(type='BN', frozen=True),
-        norm_eval=True,
         style='caffe'),
     neck=dict(
         type='FPN',
@@ -29,16 +28,16 @@ model = dict(
         roi_feat_size=7,
         num_classes=81,
         target_means=[0., 0., 0., 0.],
-        target_stds=[0.1, 0.1, 0.15, 0.15],
+        target_stds=[0.04, 0.04, 0.08, 0.08],
         reg_class_agnostic=False))
 # model training and testing settings
 train_cfg = dict(
     rcnn=dict(
         assigner=dict(
             type='MaxIoUAssigner',
-            pos_iou_thr=0.6,
-            neg_iou_thr=0.6,
-            min_pos_iou=0.6,
+            pos_iou_thr=0.65,
+            neg_iou_thr=0.65,
+            min_pos_iou=0.65,
             ignore_iof_thr=-1),
         sampler=dict(
             type='RandomSampler',
@@ -50,7 +49,7 @@ train_cfg = dict(
         debug=False))
 test_cfg = dict(
     rcnn=dict(
-        score_thr=1e-3, nms=dict(type='nms', iou_thr=0.5), max_per_img=100))
+        score_thr=0.001, nms=dict(type='nms', iou_thr=0.5), max_per_img=100))
 # dataset settings
 dataset_type = 'CocoDataset'
 data_root = 'data/coco/'
@@ -121,7 +120,7 @@ log_config = dict(
 total_epochs = 12
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
-work_dir = './work_dirs/cascadeRPN_fast_rcnn_r50_fpn_1x'
+work_dir = './work_dirs/crpn_fast_rcnn_r50_fpn_1x'
 load_from = None
 resume_from = None
 workflow = [('train', 1)]
