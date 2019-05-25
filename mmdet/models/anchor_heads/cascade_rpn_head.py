@@ -41,7 +41,7 @@ class CascadeRPNHead(CascadeAnchorHead):
     def init_weights(self):
         normal_init(self.rpn_reg, std=0.01)
         if self.with_cls:
-            if self.use_focal_loss:
+            if self.cls_focal_loss:
                 cls_bias = bias_init_with_prob(0.01)
                 normal_init(self.rpn_cls, std=0.01, bias=cls_bias)
             else:
@@ -80,7 +80,6 @@ class CascadeRPNHead(CascadeAnchorHead):
              gt_bboxes,
              img_metas,
              cfg,
-             loss_weight=1,
              gt_bboxes_ignore=None):
         losses = super(CascadeRPNHead, self).loss(
             anchor_list,
@@ -91,7 +90,6 @@ class CascadeRPNHead(CascadeAnchorHead):
             None,
             img_metas,
             cfg,
-            loss_weight=loss_weight,
             gt_bboxes_ignore=gt_bboxes_ignore)
         if self.with_cls:
             return dict(

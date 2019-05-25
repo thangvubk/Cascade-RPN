@@ -2,7 +2,7 @@
 import torch
 import torch.nn.functional as F
 
-from ..bbox import bbox_overlaps, delta2bbox
+from ..bbox import bbox_overlaps
 from ...ops import sigmoid_focal_loss
 
 
@@ -158,8 +158,8 @@ def weighted_iou_loss(pred,
                       beta=0.2,
                       eps=1e-3,
                       avg_factor=None):
-    if style not in ['bounded', 'naive']:
-        raise ValueError('Only support bounded iou loss and naive iou loss.')
+    if style not in ['bounded', 'naive', 'crpn']:
+        raise ValueError('Only support bounded, naive, and crpn iou loss.')
     inds = torch.nonzero(weight[:, 0] > 0)
     if avg_factor is None:
         avg_factor = inds.numel() + 1e-6
@@ -175,34 +175,25 @@ def weighted_iou_loss(pred,
                                 beta=beta,
                                 eps=eps,
                                 reduction='sum')
+    elif style == 'crpn':
+        loss = crpn_iou_loss(pred[inds], target[inds], reduction='sum')
     else:
         loss = iou_loss(pred[inds], target[inds], reduction='sum')
     loss = loss[None] / avg_factor
     return loss
 
 
-def crpn_iou_loss(pred,
-                  target,
-                  weight,
-                  rois,
-                  target_means,
-                  target_stds,
-                  avg_factor=None,
-                  reg_ratio=1.):
-    if avg_factor is None:
-        avg_factor = torch.sum(weight > 0).float().item() / 4 + 1e-6
-    pos_inds = weight.nonzero().view(-1, 8)[:, 0]
-    pos_mask = weight > 0
-    pos_bbox_pred = pred[pos_mask].view(-1, 4)
-    pos_bbox_target = target[pos_mask].view(-1, 4)
-    pos_rois = rois[pos_inds, :] if rois.shape[1] == 4 else rois[pos_inds, 1:]
-    pos_pred_bboxes = delta2bbox(pos_rois, pos_bbox_pred, target_means,
-                                 target_stds)
-    pos_target_bboxes = delta2bbox(pos_rois, pos_bbox_target, target_means,
-                                   target_stds)
-    ious = bbox_overlaps(pos_pred_bboxes, pos_target_bboxes, is_aligned=True)
-    iou_distances = 1 - ious
-    return torch.sum(iou_distances)[None] / avg_factor * reg_ratio
+def crpn_iou_loss(pred_bboxes, target_bboxes, reduction='mean'):
+    ious = bbox_overlaps(pred_bboxes, target_bboxes, is_aligned=True)
+    loss = 1 - ious
+
+    reduction_enum = F._Reduction.get_enum(reduction)
+    if reduction_enum == 0:
+        return loss
+    elif reduction_enum == 1:
+        return loss.mean()
+    elif reduction_enum == 2:
+        return loss.sum()
 
 
 def iou_loss(pred_bboxes, target_bboxes, reduction='mean'):

@@ -56,7 +56,6 @@ class CascadeRPN(BaseDetector, RPNTestMixin):
         for i in range(self.num_stages):
             rpn_train_cfg = self.train_cfg.rpn[i]
             rpn_head = self.rpn_head[i]
-            lw = self.train_cfg.rpn_stage_loss_weights[i]
 
             if i == 0:
                 offset_list = None
@@ -77,7 +76,7 @@ class CascadeRPN(BaseDetector, RPNTestMixin):
                 cls_score = [None for _ in bbox_pred]
             rpn_loss_inputs = (
                 anchor_list, valid_flag_list, cls_score, bbox_pred,
-                gt_bboxes, img_meta, rpn_train_cfg, lw)
+                gt_bboxes, img_meta, rpn_train_cfg)
             stage_loss = rpn_head.loss(*rpn_loss_inputs)
             for name, value in stage_loss.items():
                 losses['s{}.{}'.format(i, name)] = value

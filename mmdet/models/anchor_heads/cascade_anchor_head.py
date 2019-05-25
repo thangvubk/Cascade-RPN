@@ -5,10 +5,8 @@ import torch
 import torch.nn as nn
 
 from mmdet.core import (AnchorGenerator, anchor_target, delta2bbox,
-                        multi_apply, weighted_cross_entropy, weighted_smoothl1,
-                        weighted_binary_cross_entropy,
-                        weighted_sigmoid_focal_loss, multiclass_nms,
-                        iou_loss, giou_loss, region_anchor_target)
+                        multi_apply, multiclass_nms, region_anchor_target)
+from ..builder import build_loss
 from ..registry import HEADS
 
 
@@ -40,10 +38,14 @@ class CascadeAnchorHead(nn.Module):
                  anchor_base_sizes=None,
                  target_means=(.0, .0, .0, .0),
                  target_stds=(1.0, 1.0, 1.0, 1.0),
-                 use_sigmoid_cls=False,
-                 use_focal_loss=False,
                  with_cls=True,
-                 sampling=True):
+                 sampling=True,
+                 loss_cls=dict(
+                     type='CrossEntropyLoss',
+                     use_sigmoid=True,
+                     loss_weight=1.0),
+                 loss_bbox=dict(
+                     type='SmoothL1Loss', beta=1.0 / 9.0, loss_weight=1.0)):
         super(CascadeAnchorHead, self).__init__()
         self.in_channels = in_channels
         self.num_classes = num_classes
@@ -55,11 +57,18 @@ class CascadeAnchorHead(nn.Module):
             anchor_strides) if anchor_base_sizes is None else anchor_base_sizes
         self.target_means = target_means
         self.target_stds = target_stds
-        self.use_sigmoid_cls = use_sigmoid_cls
-        self.use_focal_loss = use_focal_loss
         self.with_cls = with_cls
         self.sampling = sampling
-        if use_focal_loss:
+        self.use_sigmoid_cls = loss_cls.get('use_sigmoid', False)
+        self.cls_focal_loss = loss_cls['type'] in ['FocalLoss']
+        if self.use_sigmoid_cls:
+            self.cls_out_channels = num_classes - 1
+        else:
+            self.cls_out_channels = num_classes
+        self.use_iou_reg = loss_bbox['type'] in ['IoULoss']
+        self.loss_cls = build_loss(loss_cls)
+        self.loss_bbox = build_loss(loss_bbox)
+        if self.cls_focal_loss:
             assert not sampling
 
         self.anchor_generators = []
@@ -127,74 +136,34 @@ class CascadeAnchorHead(nn.Module):
         return anchor_list, valid_flag_list
 
     def loss_single(self, cls_score, bbox_pred, rois, labels, label_weights,
-                    bbox_targets, bbox_weights, num_total_samples, cfg,
-                    loss_weight):
+                    bbox_targets, bbox_weights, num_total_samples, cfg):
         # classification loss
         if self.with_cls:
             labels = labels.reshape(-1)
             label_weights = label_weights.reshape(-1)
             cls_score = cls_score.permute(0, 2, 3, 1).reshape(
                 -1, self.cls_out_channels)
-            if self.use_sigmoid_cls:
-                if self.use_focal_loss:
-                    cls_criterion = weighted_sigmoid_focal_loss
-                else:
-                    cls_criterion = weighted_binary_cross_entropy
-            else:
-                if self.use_focal_loss:
-                    raise NotImplementedError
-                else:
-                    cls_criterion = weighted_cross_entropy
-            if self.use_focal_loss:
-                loss_cls = cls_criterion(
-                    cls_score,
-                    labels,
-                    label_weights,
-                    gamma=cfg.gamma,
-                    alpha=cfg.alpha,
-                    avg_factor=num_total_samples)
-            else:
-                loss_cls = cls_criterion(cls_score, labels, label_weights,
-                                         avg_factor=num_total_samples)
+            loss_cls = self.loss_cls(
+                cls_score, labels, label_weights, avg_factor=num_total_samples)
         # regression loss
         bbox_targets = bbox_targets.reshape(-1, 4)
         bbox_weights = bbox_weights.reshape(-1, 4)
         bbox_pred = bbox_pred.permute(0, 2, 3, 1).reshape(-1, 4)
-        bbox_loss_cfg = cfg.get('bbox_loss', None)
-        if bbox_loss_cfg is None:
-            loss_reg = weighted_smoothl1(
-                bbox_pred,
-                bbox_targets,
-                bbox_weights,
-                beta=cfg.smoothl1_beta,
-                avg_factor=num_total_samples)
-        elif bbox_loss_cfg.type == 'IoU':
+        if self.use_iou_reg:
+            # convert delta to bbox
             rois = rois.reshape(-1, 4)
-            loss_reg = iou_loss(
-                bbox_pred,
-                bbox_targets,
-                bbox_weights,
-                rois,
-                self.target_means,
-                self.target_stds,
-                reg_ratio=bbox_loss_cfg.reg_ratio,
-                avg_factor=num_total_samples)
-        elif bbox_loss_cfg.type == 'GIoU':
-            rois = rois.reshape(-1, 4)
-            loss_reg = giou_loss(
-                bbox_pred,
-                bbox_targets,
-                bbox_weights,
-                rois,
-                self.target_means,
-                self.target_stds,
-                reg_ratio=bbox_loss_cfg.reg_ratio,
-                avg_factor=num_total_samples)
-        else:
-            raise Exception('Unknown config {}'.format(bbox_loss_cfg.type))
+            bbox_pred = delta2bbox(
+                rois, bbox_pred, self.target_means, self.target_stds)
+            bbox_targets = delta2bbox(
+                rois, bbox_targets, self.target_means, self.target_stds)
+        loss_reg = self.loss_bbox(
+            bbox_pred,
+            bbox_targets,
+            bbox_weights,
+            avg_factor=num_total_samples)
         if self.with_cls:
-            return loss_cls * loss_weight, loss_reg * loss_weight
-        return None, loss_reg * loss_weight
+            return loss_cls, loss_reg
+        return None, loss_reg
 
     def loss(self,
              anchor_list,
@@ -205,7 +174,6 @@ class CascadeAnchorHead(nn.Module):
              gt_labels,
              img_metas,
              cfg,
-             loss_weight=1,
              gt_bboxes_ignore=None):
         featmap_sizes = [featmap.size()[-2:] for featmap in bbox_preds]
         label_channels = self.cls_out_channels if self.use_sigmoid_cls else 1
@@ -261,8 +229,7 @@ class CascadeAnchorHead(nn.Module):
             bbox_targets_list,
             bbox_weights_list,
             num_total_samples=num_total_samples,
-            cfg=cfg,
-            loss_weight=loss_weight)
+            cfg=cfg)
         if self.with_cls:
             return dict(loss_cls=losses[0], loss_reg=losses[1])
         return dict(loss_reg=losses[1])
