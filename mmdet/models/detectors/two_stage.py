@@ -125,7 +125,9 @@ class TwoStageDetector(BaseDetector, RPNTestMixin, BBoxTestMixin,
                 *rpn_loss_inputs, gt_bboxes_ignore=gt_bboxes_ignore)
             losses.update(rpn_losses)
 
-            proposal_inputs = rpn_outs + (img_meta, self.test_cfg.rpn)
+            proposal_cfg = self.train_cfg.get('rpn_proposal',
+                                              self.test_cfg.rpn)
+            proposal_inputs = rpn_outs + (img_meta, proposal_cfg)
             proposal_list = self.rpn_head.get_bboxes(*proposal_inputs)
 
         elif self.with_cascade_rpn:
