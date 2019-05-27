@@ -1,13 +1,49 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from mmcv.cnn import normal_init
 
 from mmdet.core import delta2bbox
 from mmdet.ops import nms, DeformConv
 from .cascade_anchor_head import CascadeAnchorHead
 from ..registry import HEADS
-from ..utils import bias_init_with_prob
+
+
+class AdaptiveConv(nn.Module):
+    """ Adaptive Conv is built based on Deformable Conv
+    with precomputed offsets which derived from anchors"""
+
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 dilation=1,
+                 adapt=True):
+        super(AdaptiveConv, self).__init__()
+        self.adapt = adapt
+        if self.adapt:
+            assert dilation == 1
+            self.conv = DeformConv(in_channels, out_channels, 3, padding=1)
+        else:  # fallback to normal Conv2d
+            self.conv = nn.Conv2d(in_channels,
+                                  out_channels,
+                                  3,
+                                  padding=dilation,
+                                  dilation=dilation)
+
+    def init_weights(self):
+        normal_init(self.conv, std=0.01)
+
+    def forward(self, x, offset):
+        if self.adapt:
+            N, _, H, W = x.shape
+            assert offset is not None
+            assert H * W == offset.shape[1]
+            # reshape [N, NA, 18] to (N, 18, H, W)
+            offset = offset.permute(0, 2, 1).reshape(N, -1, H, W)
+            x = self.conv(x, offset)
+        else:
+            assert offset is None
+            x = self.conv(x)
+        return x
 
 
 @HEADS.register_module
@@ -22,55 +58,31 @@ class CascadeRPNHead(CascadeAnchorHead):
         self._init_layers()
 
     def _init_layers(self):
-        if self.feat_adapt:
-            assert self.dilation == 1
-            self.adapt_conv = DeformConv(
-                self.feat_channels, self.feat_channels, 3, padding=1)
-        else:
-            self.rpn_conv = nn.Conv2d(self.in_channels,
-                                      self.feat_channels,
-                                      3,
-                                      padding=self.dilation,
-                                      dilation=self.dilation)
+        self.rpn_conv = AdaptiveConv(self.in_channels,
+                                     self.feat_channels,
+                                     dilation=self.dilation,
+                                     adapt=self.feat_adapt)
         if self.with_cls:
             self.rpn_cls = nn.Conv2d(self.feat_channels,
                                      self.num_anchors * self.cls_out_channels,
                                      1)
         self.rpn_reg = nn.Conv2d(self.feat_channels, self.num_anchors * 4, 1)
+        self.relu = nn.ReLU(inplace=True)
 
     def init_weights(self):
+        self.rpn_conv.init_weights()
         normal_init(self.rpn_reg, std=0.01)
         if self.with_cls:
-            if self.cls_focal_loss:
-                cls_bias = bias_init_with_prob(0.01)
-                normal_init(self.rpn_cls, std=0.01, bias=cls_bias)
-            else:
-                normal_init(self.rpn_cls, std=0.01)
-        if self.feat_adapt:
-            normal_init(self.adapt_conv, std=0.01)
-        else:
-            normal_init(self.rpn_conv, std=0.01)
+            normal_init(self.rpn_cls, std=0.01)
 
     def forward_single(self, x, offset):
-        if self.feat_adapt:
-            assert offset is not None
-            N, _, H, W = x.shape
-            assert H * W == offset.shape[1]
-            # reshape [N, NA, 18] to (N, 18, H, W)
-            offset = offset.permute(0, 2, 1).reshape(N, -1, H, W)
-            x = self.adapt_conv(x, offset)
-        else:
-            x = self.rpn_conv(x)
-        x = F.relu(x, inplace=True)
-        out = ()
+        bridged_x = x
+        x = self.relu(self.rpn_conv(x, offset))
         if self.bridged_feature:
-            out = out + (x,)
-        if self.with_cls:
-            rpn_cls_score = self.rpn_cls(x)
-            out = out + (rpn_cls_score,)
-        rpn_bbox_pred = self.rpn_reg(x)
-        out = out + (rpn_bbox_pred,)
-        return out
+            bridged_x = x  # update feature
+        cls_score = self.rpn_cls(x) if self.with_cls else None
+        bbox_pred = self.rpn_reg(x)
+        return bridged_x, cls_score, bbox_pred
 
     def loss(self,
              anchor_list,

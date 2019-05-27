@@ -57,23 +57,12 @@ class CascadeRPN(BaseDetector, RPNTestMixin):
             rpn_train_cfg = self.train_cfg.rpn[i]
             rpn_head = self.rpn_head[i]
 
-            if i == 0:
-                offset_list = None
-            else:
+            if rpn_head.feat_adapt:
                 offset_list = anchor_offset(
                     anchor_list, rpn_head.anchor_strides, featmap_sizes)
-            # check with_cls and bridged_feature
-            if rpn_head.with_cls:
-                if rpn_head.bridged_feature:
-                    x, cls_score, bbox_pred = rpn_head(x, offset_list)
-                else:
-                    cls_score, bbox_pred = rpn_head(x, offset_list)
             else:
-                if rpn_head.bridged_feature:
-                    x, bbox_pred = rpn_head(x, offset_list)
-                else:
-                    bbox_pred = rpn_head(x, offset_list)[0]  # returned tupple
-                cls_score = [None for _ in bbox_pred]
+                offset_list = None
+            x, cls_score, bbox_pred = rpn_head(x, offset_list)
             rpn_loss_inputs = (
                 anchor_list, valid_flag_list, cls_score, bbox_pred,
                 gt_bboxes, img_meta, rpn_train_cfg)
@@ -93,21 +82,12 @@ class CascadeRPN(BaseDetector, RPNTestMixin):
 
         for i in range(self.num_stages):
             rpn_head = self.rpn_head[i]
-            if i == 0:
-                offset_list = None
-            else:
+            if rpn_head.feat_adapt:
                 offset_list = anchor_offset(
                     anchor_list, rpn_head.anchor_strides, featmap_sizes)
-            if rpn_head.with_cls:
-                if rpn_head.bridged_feature:
-                    x, cls_score, bbox_pred = rpn_head(x, offset_list)
-                else:
-                    cls_score, bbox_pred = rpn_head(x, offset_list)
             else:
-                if rpn_head.bridged_feature:
-                    x, bbox_pred = rpn_head(x, offset_list)
-                else:
-                    bbox_pred = rpn_head(x, offset_list)[0]  # returned tupple
+                offset_list = None
+            x, cls_score, bbox_pred = rpn_head(x, offset_list)
             if i < self.num_stages - 1:
                 anchor_list = rpn_head.refine_bboxes(
                     anchor_list, bbox_pred, img_meta)
