@@ -9,7 +9,7 @@ model = dict(
         num_stages=4,
         out_indices=(0, 1, 2, 3),
         frozen_stages=1,
-        normalize=dict(type='BN', frozen=True),
+        norm_cfg=dict(type='BN', requires_grad=False),
         style='caffe'),
     neck=dict(
         type='FPN',
@@ -26,11 +26,14 @@ model = dict(
             anchor_strides=[4, 8, 16, 32, 64],
             target_means=[.0, .0, .0, .0],
             target_stds=[0.1, 0.1, 0.5, 0.5],
-            # args for cascade_rpn
             with_cls=False,
             dilation=3,
             bridged_feature=True,
-            sampling=False),
+            sampling=False,
+            loss_cls=dict(
+                type='CrossEntropyLoss', use_sigmoid=True, loss_weight=1.0),
+            loss_bbox=dict(
+                type='IoULoss', style='crpn', loss_weight=10.0)),
         dict(
             type='CascadeRPNHead',
             in_channels=256,
@@ -40,9 +43,11 @@ model = dict(
             anchor_strides=[4, 8, 16, 32, 64],
             target_means=[.0, .0, .0, .0],
             target_stds=[0.05, 0.05, 0.1, 0.1],
-            # args for cascade_rpn
-            use_sigmoid_cls=True,
-            feat_adapt=True)
+            feat_adapt=True,
+            loss_cls=dict(
+                type='CrossEntropyLoss', use_sigmoid=True, loss_weight=1.0),
+            loss_bbox=dict(
+                type='IoULoss', style='crpn', loss_weight=10.0))
     ])
 # model training and testing settings
 train_cfg = dict(
@@ -54,7 +59,6 @@ train_cfg = dict(
                 ignore_ratio=0.5),
             allowed_border=-1,
             pos_weight=-1,
-            bbox_loss=dict(type='IoU', reg_ratio=10),
             debug=False),
         dict(
             assigner=dict(
@@ -71,9 +75,7 @@ train_cfg = dict(
                 add_gt_as_proposals=False),
             allowed_border=-1,
             pos_weight=-1,
-            bbox_loss=dict(type='IoU', reg_ratio=10),
-            debug=False)],
-    rpn_stage_loss_weights=[1, 1])
+            debug=False)])
 test_cfg = dict(
     rpn=dict(
         nms_across_levels=False,
@@ -146,7 +148,7 @@ log_config = dict(
 total_epochs = 12
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
-work_dir = './work_dirs/cascade_rpn_r50_fpn_1x'
+work_dir = './work_dirs/cascade_rpn_r101_fpn_1x'
 load_from = None
 resume_from = None
 workflow = [('train', 1)]
