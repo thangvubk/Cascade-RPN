@@ -9,7 +9,8 @@ model = dict(
         num_stages=4,
         out_indices=(0, 1, 2, 3),
         frozen_stages=1,
-        normalize=dict(type='BN', frozen=True),
+        norm_cfg=dict(type='BN', requires_grad=False),
+        norm_eval=True,
         style='caffe'),
     neck=dict(
         type='FPN',
@@ -26,11 +27,14 @@ model = dict(
             anchor_strides=[4, 8, 16, 32, 64],
             target_means=[.0, .0, .0, .0],
             target_stds=[0.1, 0.1, 0.5, 0.5],
-            # args for cascade_rpn
             with_cls=False,
             dilation=3,
             bridged_feature=True,
-            sampling=False),
+            sampling=False,
+            loss_cls=dict(
+                type='CrossEntropyLoss', use_sigmoid=True, loss_weight=1.0),
+            loss_bbox=dict(
+                type='IoULoss', style='crpn', loss_weight=10.0)),
         dict(
             type='CascadeRPNHead',
             in_channels=256,
@@ -40,9 +44,11 @@ model = dict(
             anchor_strides=[4, 8, 16, 32, 64],
             target_means=[.0, .0, .0, .0],
             target_stds=[0.05, 0.05, 0.1, 0.1],
-            # args for cascade_rpn
-            use_sigmoid_cls=True,
-            feat_adapt=True)],
+            feat_adapt=True,
+            loss_cls=dict(
+                type='CrossEntropyLoss', use_sigmoid=True, loss_weight=1.0),
+            loss_bbox=dict(
+                type='IoULoss', style='crpn', loss_weight=10.0))],
     bbox_roi_extractor=dict(
         type='SingleRoIExtractor',
         roi_layer=dict(type='RoIAlign', out_size=7, sample_num=2),
@@ -57,7 +63,10 @@ model = dict(
         num_classes=81,
         target_means=[0., 0., 0., 0.],
         target_stds=[0.04, 0.04, 0.08, 0.08],
-        reg_class_agnostic=False))
+        reg_class_agnostic=False,
+        loss_cls=dict(
+            type='CrossEntropyLoss', use_sigmoid=False, loss_weight=1.5 * 1.5),
+        loss_bbox=dict(type='SmoothL1Loss', beta=1.0 / 9.0 , loss_weight=1.5)))
 # model training and testing settings
 train_cfg = dict(
     rpn=[
@@ -68,7 +77,6 @@ train_cfg = dict(
                 ignore_ratio=0.5),
             allowed_border=-1,
             pos_weight=-1,
-            bbox_loss=dict(type='IoU', reg_ratio=10),
             debug=False),
         dict(
             assigner=dict(
@@ -85,9 +93,14 @@ train_cfg = dict(
                 add_gt_as_proposals=False),
             allowed_border=-1,
             pos_weight=-1,
-            bbox_loss=dict(type='IoU', reg_ratio=10),
             debug=False)],
-    rpn_stage_loss_weights=[0.7, 0.7],
+    rpn_proposal=dict(
+        nms_across_levels=False,
+        nms_pre=2000,
+        nms_post=2000,
+        max_num=300,
+        nms_thr=0.8,
+        min_bbox_size=0),
     rcnn=dict(
         assigner=dict(
             type='MaxIoUAssigner',
@@ -106,8 +119,8 @@ train_cfg = dict(
 test_cfg = dict(
     rpn=dict(
         nms_across_levels=False,
-        nms_pre=2000,
-        nms_post=2000,
+        nms_pre=1000,
+        nms_post=1000,
         max_num=300,
         nms_thr=0.8,
         min_bbox_size=0),
@@ -180,7 +193,7 @@ log_config = dict(
 total_epochs = 12
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
-work_dir = './work_dirs/crpn_faster_rcnn_r50_fpn_1x'
+work_dir = './work_dirs/crpn_faster_rcnn_r50_fpn_1x_final_merge'
 load_from = None
 resume_from = None
 workflow = [('train', 1)]
