@@ -1,3 +1,5 @@
+rpn_weight = 0.7
+
 # model settings
 model = dict(
     type='FasterRCNN',
@@ -32,9 +34,9 @@ model = dict(
             bridged_feature=True,
             sampling=False,
             loss_cls=dict(
-                type='CrossEntropyLoss', use_sigmoid=True, loss_weight=1.0),
+                type='CrossEntropyLoss', use_sigmoid=True, loss_weight=rpn_weight),
             loss_bbox=dict(
-                type='IoULoss', style='crpn', loss_weight=10.0)),
+                type='IoULoss', style='crpn', loss_weight=10.0 * rpn_weight)),
         dict(
             type='CascadeRPNHead',
             in_channels=256,
@@ -46,9 +48,9 @@ model = dict(
             target_stds=[0.05, 0.05, 0.1, 0.1],
             feat_adapt=True,
             loss_cls=dict(
-                type='CrossEntropyLoss', use_sigmoid=True, loss_weight=1.0),
+                type='CrossEntropyLoss', use_sigmoid=True, loss_weight=1.0 * rpn_weight),
             loss_bbox=dict(
-                type='IoULoss', style='crpn', loss_weight=10.0))],
+                type='IoULoss', style='crpn', loss_weight=10.0 * rpn_weight))],
     bbox_roi_extractor=dict(
         type='SingleRoIExtractor',
         roi_layer=dict(type='RoIAlign', out_size=7, sample_num=2),
@@ -65,8 +67,8 @@ model = dict(
         target_stds=[0.04, 0.04, 0.08, 0.08],
         reg_class_agnostic=False,
         loss_cls=dict(
-            type='CrossEntropyLoss', use_sigmoid=False, loss_weight=1.5 * 1.5),
-        loss_bbox=dict(type='SmoothL1Loss', beta=1.0 / 9.0 , loss_weight=1.5)))
+            type='CrossEntropyLoss', use_sigmoid=False, loss_weight=1.5),
+        loss_bbox=dict(type='SmoothL1Loss', beta=1.0, loss_weight=1.0)))
 # model training and testing settings
 train_cfg = dict(
     rpn=[
@@ -193,7 +195,7 @@ log_config = dict(
 total_epochs = 12
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
-work_dir = './work_dirs/crpn_faster_rcnn_r50_fpn_1x_final_merge'
+work_dir = './work_dirs/crpn_faster_rcnn_r50_fpn_1x_final_merge_fixed'
 load_from = None
 resume_from = None
 workflow = [('train', 1)]
