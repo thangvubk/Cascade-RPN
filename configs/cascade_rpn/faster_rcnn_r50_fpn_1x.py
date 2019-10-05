@@ -34,7 +34,9 @@ model = dict(
             bridged_feature=True,
             sampling=False,
             loss_cls=dict(
-                type='CrossEntropyLoss', use_sigmoid=True, loss_weight=rpn_weight),
+                type='CrossEntropyLoss',
+                use_sigmoid=True,
+                loss_weight=rpn_weight),
             loss_bbox=dict(
                 type='IoULoss', style='crpn', loss_weight=10.0 * rpn_weight)),
         dict(
@@ -48,7 +50,9 @@ model = dict(
             target_stds=[0.05, 0.05, 0.1, 0.1],
             feat_adapt=True,
             loss_cls=dict(
-                type='CrossEntropyLoss', use_sigmoid=True, loss_weight=1.0 * rpn_weight),
+                type='CrossEntropyLoss',
+                use_sigmoid=True,
+                loss_weight=1.0 * rpn_weight),
             loss_bbox=dict(
                 type='IoULoss', style='crpn', loss_weight=10.0 * rpn_weight))],
     bbox_roi_extractor=dict(

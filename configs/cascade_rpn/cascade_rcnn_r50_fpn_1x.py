@@ -33,9 +33,13 @@ model = dict(
             bridged_feature=True,
             sampling=False,
             loss_cls=dict(
-                type='CrossEntropyLoss', use_sigmoid=True, loss_weight=rpn_weight),
+                type='CrossEntropyLoss',
+                use_sigmoid=True,
+                loss_weight=rpn_weight),
             loss_bbox=dict(
-                type='IoULoss', style='crpn', loss_weight=10.0 * rpn_weight)),
+                type='IoULoss',
+                style='crpn',
+                loss_weight=10.0 * rpn_weight)),
         dict(
             type='CascadeRPNHead',
             in_channels=256,
@@ -47,9 +51,13 @@ model = dict(
             target_stds=[0.05, 0.05, 0.1, 0.1],
             feat_adapt=True,
             loss_cls=dict(
-                type='CrossEntropyLoss', use_sigmoid=True, loss_weight=1.0 * rpn_weight),
+                type='CrossEntropyLoss',
+                use_sigmoid=True,
+                loss_weight=1.0 * rpn_weight),
             loss_bbox=dict(
-                type='IoULoss', style='crpn', loss_weight=10.0 * rpn_weight))],
+                type='IoULoss',
+                style='crpn',
+                loss_weight=10.0 * rpn_weight))],
     bbox_roi_extractor=dict(
         type='SingleRoIExtractor',
         roi_layer=dict(type='RoIAlign', out_size=7, sample_num=2),
@@ -202,7 +210,7 @@ log_config = dict(
 total_epochs = 12
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
-work_dir = './work_dirs/crcnn_crpn_1stage_simulate-faster-rcnn_iou0.5_pytorch_agnostic_2000proposals'
+work_dir = './work_dirs/crcnn_crpn_1stage_simulate-faster-rcnn_iou0.5_pytorch_agnostic_2000proposals'  # noqa: E501
 load_from = None
 resume_from = None
 workflow = [('train', 1)]
