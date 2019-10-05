@@ -10,7 +10,7 @@ from mmdet import datasets
 from mmdet.core import (CocoDistEvalmAPHook, CocoDistEvalRecallHook,
                         DistEvalmAPHook, DistOptimizerHook, Fp16OptimizerHook)
 from mmdet.datasets import DATASETS, build_dataloader
-from mmdet.models import CascadeRPN, RPN
+from mmdet.models import RPN, CascadeRPN
 from .env import get_root_logger
 
 

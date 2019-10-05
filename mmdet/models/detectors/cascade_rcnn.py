@@ -3,9 +3,9 @@ from __future__ import division
 import torch
 import torch.nn as nn
 
-from mmdet.core import (bbox2result, bbox2roi, bbox_mapping, build_assigner,
-                        build_sampler, merge_aug_bboxes, merge_aug_masks,
-                        multiclass_nms, anchor_offset)
+from mmdet.core import (anchor_offset, bbox2result, bbox2roi, bbox_mapping,
+                        build_assigner, build_sampler, merge_aug_bboxes,
+                        merge_aug_masks, multiclass_nms)
 from .. import builder
 from ..registry import DETECTORS
 from .base import BaseDetector
@@ -200,15 +200,16 @@ class CascadeRCNN(BaseDetector, RPNTestMixin):
                 rpn_head = self.rpn_head[i]
 
                 if rpn_head.feat_adapt:
-                    offset_list = anchor_offset(
-                        anchor_list, rpn_head.anchor_strides, featmap_sizes)
+                    offset_list = anchor_offset(anchor_list,
+                                                rpn_head.anchor_strides,
+                                                featmap_sizes)
                 else:
                     offset_list = None
-                rpn_feat, cls_score, bbox_pred = rpn_head(rpn_feat,
-                                                          offset_list)
-                rpn_loss_inputs = (
-                    anchor_list, valid_flag_list, cls_score, bbox_pred,
-                    gt_bboxes, img_meta, rpn_train_cfg)
+                rpn_feat, cls_score, bbox_pred = rpn_head(
+                    rpn_feat, offset_list)
+                rpn_loss_inputs = (anchor_list, valid_flag_list, cls_score,
+                                   bbox_pred, gt_bboxes, img_meta,
+                                   rpn_train_cfg)
                 stage_loss = rpn_head.loss(*rpn_loss_inputs)
                 for name, value in stage_loss.items():
                     losses['s{}.{}'.format(i, name)] = value
@@ -318,8 +319,8 @@ class CascadeRCNN(BaseDetector, RPNTestMixin):
     def simple_test(self, img, img_meta, proposals=None, rescale=False):
         x = self.extract_feat(img)
         if self.with_rpn:
-            proposal_list = self.simple_test_rpn(
-                x, img_meta, self.test_cfg.rpn)
+            proposal_list = self.simple_test_rpn(x, img_meta,
+                                                 self.test_cfg.rpn)
         elif self.with_cascade_rpn:
             rpn_feat = x
             featmap_sizes = [featmap.size()[-2:] for featmap in rpn_feat]
@@ -329,8 +330,9 @@ class CascadeRCNN(BaseDetector, RPNTestMixin):
             for i in range(self.num_rpn_stages):
                 rpn_head = self.rpn_head[i]
                 if rpn_head.feat_adapt:
-                    offset_list = anchor_offset(
-                        anchor_list, rpn_head.anchor_strides, featmap_sizes)
+                    offset_list = anchor_offset(anchor_list,
+                                                rpn_head.anchor_strides,
+                                                featmap_sizes)
                 else:
                     offset_list = None
                 rpn_feat, cls_score, bbox_pred = rpn_head(

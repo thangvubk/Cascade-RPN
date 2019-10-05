@@ -3,31 +3,28 @@ import torch.nn as nn
 from mmcv.cnn import normal_init
 
 from mmdet.core import delta2bbox
-from mmdet.ops import nms, DeformConv
-from .cascade_anchor_head import CascadeAnchorHead
+from mmdet.ops import DeformConv, nms
 from ..registry import HEADS
+from .cascade_anchor_head import CascadeAnchorHead
 
 
 class AdaptiveConv(nn.Module):
     """ Adaptive Conv is built based on Deformable Conv
     with precomputed offsets which derived from anchors"""
 
-    def __init__(self,
-                 in_channels,
-                 out_channels,
-                 dilation=1,
-                 adapt=True):
+    def __init__(self, in_channels, out_channels, dilation=1, adapt=True):
         super(AdaptiveConv, self).__init__()
         self.adapt = adapt
         if self.adapt:
             assert dilation == 1
             self.conv = DeformConv(in_channels, out_channels, 3, padding=1)
         else:  # fallback to normal Conv2d
-            self.conv = nn.Conv2d(in_channels,
-                                  out_channels,
-                                  3,
-                                  padding=dilation,
-                                  dilation=dilation)
+            self.conv = nn.Conv2d(
+                in_channels,
+                out_channels,
+                3,
+                padding=dilation,
+                dilation=dilation)
 
     def init_weights(self):
         normal_init(self.conv, std=0.01)
@@ -49,8 +46,12 @@ class AdaptiveConv(nn.Module):
 @HEADS.register_module
 class CascadeRPNHead(CascadeAnchorHead):
 
-    def __init__(self, in_channels, feat_adapt=False, dilation=1,
-                 bridged_feature=False, **kwargs):
+    def __init__(self,
+                 in_channels,
+                 feat_adapt=False,
+                 dilation=1,
+                 bridged_feature=False,
+                 **kwargs):
         super(CascadeRPNHead, self).__init__(2, in_channels, **kwargs)
         self.feat_adapt = feat_adapt
         self.dilation = dilation
@@ -58,10 +59,11 @@ class CascadeRPNHead(CascadeAnchorHead):
         self._init_layers()
 
     def _init_layers(self):
-        self.rpn_conv = AdaptiveConv(self.in_channels,
-                                     self.feat_channels,
-                                     dilation=self.dilation,
-                                     adapt=self.feat_adapt)
+        self.rpn_conv = AdaptiveConv(
+            self.in_channels,
+            self.feat_channels,
+            dilation=self.dilation,
+            adapt=self.feat_adapt)
         if self.with_cls:
             self.rpn_cls = nn.Conv2d(self.feat_channels,
                                      self.num_anchors * self.cls_out_channels,

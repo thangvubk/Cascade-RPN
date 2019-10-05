@@ -1,12 +1,12 @@
-from torch import nn
 import mmcv
+from torch import nn
 
-from mmdet.core import (tensor2imgs, anchor_offset, merge_aug_proposals,
-                        bbox_mapping)
-from .base import BaseDetector
-from .test_mixins import RPNTestMixin
+from mmdet.core import (anchor_offset, bbox_mapping, merge_aug_proposals,
+                        tensor2imgs)
 from .. import builder
 from ..registry import DETECTORS
+from .base import BaseDetector
+from .test_mixins import RPNTestMixin
 
 
 @DETECTORS.register_module
@@ -58,22 +58,22 @@ class CascadeRPN(BaseDetector, RPNTestMixin):
             rpn_head = self.rpn_head[i]
 
             if rpn_head.feat_adapt:
-                offset_list = anchor_offset(
-                    anchor_list, rpn_head.anchor_strides, featmap_sizes)
+                offset_list = anchor_offset(anchor_list,
+                                            rpn_head.anchor_strides,
+                                            featmap_sizes)
             else:
                 offset_list = None
             x, cls_score, bbox_pred = rpn_head(x, offset_list)
-            rpn_loss_inputs = (
-                anchor_list, valid_flag_list, cls_score, bbox_pred,
-                gt_bboxes, img_meta, rpn_train_cfg)
+            rpn_loss_inputs = (anchor_list, valid_flag_list, cls_score,
+                               bbox_pred, gt_bboxes, img_meta, rpn_train_cfg)
             stage_loss = rpn_head.loss(*rpn_loss_inputs)
             for name, value in stage_loss.items():
                 losses['s{}.{}'.format(i, name)] = value
 
             # refine boxes
             if i < self.num_stages - 1:
-                anchor_list = rpn_head.refine_bboxes(
-                    anchor_list, bbox_pred, img_meta)
+                anchor_list = rpn_head.refine_bboxes(anchor_list, bbox_pred,
+                                                     img_meta)
         return losses
 
     def common_test(self, x, img_meta):
@@ -83,17 +83,19 @@ class CascadeRPN(BaseDetector, RPNTestMixin):
         for i in range(self.num_stages):
             rpn_head = self.rpn_head[i]
             if rpn_head.feat_adapt:
-                offset_list = anchor_offset(
-                    anchor_list, rpn_head.anchor_strides, featmap_sizes)
+                offset_list = anchor_offset(anchor_list,
+                                            rpn_head.anchor_strides,
+                                            featmap_sizes)
             else:
                 offset_list = None
             x, cls_score, bbox_pred = rpn_head(x, offset_list)
             if i < self.num_stages - 1:
-                anchor_list = rpn_head.refine_bboxes(
-                    anchor_list, bbox_pred, img_meta)
+                anchor_list = rpn_head.refine_bboxes(anchor_list, bbox_pred,
+                                                     img_meta)
 
-        proposal_list = self.rpn_head[-1].get_bboxes(
-            anchor_list, cls_score, bbox_pred, img_meta, self.test_cfg.rpn)
+        proposal_list = self.rpn_head[-1].get_bboxes(anchor_list, cls_score,
+                                                     bbox_pred, img_meta,
+                                                     self.test_cfg.rpn)
         return proposal_list
 
     def simple_test(self, img, img_meta, rescale=False):

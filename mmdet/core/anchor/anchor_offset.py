@@ -13,6 +13,7 @@ def anchor_offset(anchor_list, anchor_strides, featmap_sizes):
         offset_list (list[tensor]): [NLVL, NA, 2, 18]: offset of 3x3 deformable
         kernel.
     """
+
     def _shape_offset(anchors, stride):
         # currently support kernel_size=3 and dilation=1
         ks = 3
@@ -66,10 +67,11 @@ def anchor_offset(anchor_list, anchor_strides, featmap_sizes):
     for i in range(num_imgs):
         mlvl_offset = []
         for lvl in range(num_lvls):
-            c_offset_x, c_offset_y = _ctr_offset(
-                anchor_list[i][lvl], anchor_strides[lvl], featmap_sizes[lvl])
-            s_offset_x, s_offset_y = _shape_offset(
-                anchor_list[i][lvl], anchor_strides[lvl])
+            c_offset_x, c_offset_y = _ctr_offset(anchor_list[i][lvl],
+                                                 anchor_strides[lvl],
+                                                 featmap_sizes[lvl])
+            s_offset_x, s_offset_y = _shape_offset(anchor_list[i][lvl],
+                                                   anchor_strides[lvl])
 
             # offset = ctr_offset + shape_offset
             offset_x = s_offset_x + c_offset_x[:, None]

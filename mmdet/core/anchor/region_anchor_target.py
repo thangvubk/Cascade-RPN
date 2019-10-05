@@ -1,6 +1,6 @@
 import torch
 
-from ..bbox import (build_assigner, build_sampler, PseudoSampler, bbox2delta)
+from ..bbox import PseudoSampler, bbox2delta, build_assigner, build_sampler
 from ..utils import multi_apply
 
 
@@ -102,29 +102,37 @@ def images_to_levels(target, num_level_anchors):
     return level_targets
 
 
-def region_anchor_target_single(anchors,
-                                valid_flags,
-                                gt_bboxes,
-                                gt_bboxes_ignore,
-                                gt_labels,
-                                img_meta,
-                                featmap_sizes,
-                                anchor_scale,
-                                anchor_strides,
-                                target_means,
-                                target_stds,
-                                cfg,
-                                label_channels=1,  # TODO: check this arg
-                                sampling=True):
+def region_anchor_target_single(
+        anchors,
+        valid_flags,
+        gt_bboxes,
+        gt_bboxes_ignore,
+        gt_labels,
+        img_meta,
+        featmap_sizes,
+        anchor_scale,
+        anchor_strides,
+        target_means,
+        target_stds,
+        cfg,
+        label_channels=1,  # TODO: check this arg
+        sampling=True):
     bbox_assigner = build_assigner(cfg.assigner)
     assign_result = bbox_assigner.assign(
-        anchors, valid_flags, gt_bboxes, img_meta, featmap_sizes, anchor_scale,
-        anchor_strides, gt_bboxes_ignore=gt_bboxes_ignore, gt_labels=None,
+        anchors,
+        valid_flags,
+        gt_bboxes,
+        img_meta,
+        featmap_sizes,
+        anchor_scale,
+        anchor_strides,
+        gt_bboxes_ignore=gt_bboxes_ignore,
+        gt_labels=None,
         allowed_border=cfg.allowed_border)
     bbox_sampler = build_sampler(cfg.sampler) if sampling else PseudoSampler()
     flat_anchors = torch.cat(anchors)
-    sampling_result = bbox_sampler.sample(
-        assign_result, flat_anchors, gt_bboxes)
+    sampling_result = bbox_sampler.sample(assign_result, flat_anchors,
+                                          gt_bboxes)
 
     num_anchors = flat_anchors.shape[0]
     bbox_targets = torch.zeros_like(flat_anchors)

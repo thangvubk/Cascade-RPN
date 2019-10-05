@@ -141,8 +141,8 @@ class CascadeAnchorHead(nn.Module):
         if self.with_cls:
             labels = labels.reshape(-1)
             label_weights = label_weights.reshape(-1)
-            cls_score = cls_score.permute(0, 2, 3, 1).reshape(
-                -1, self.cls_out_channels)
+            cls_score = cls_score.permute(0, 2, 3,
+                                          1).reshape(-1, self.cls_out_channels)
             loss_cls = self.loss_cls(
                 cls_score, labels, label_weights, avg_factor=num_total_samples)
         # regression loss
@@ -152,10 +152,10 @@ class CascadeAnchorHead(nn.Module):
         if self.use_iou_reg:
             # convert delta to bbox
             rois = rois.reshape(-1, 4)
-            bbox_pred = delta2bbox(
-                rois, bbox_pred, self.target_means, self.target_stds)
-            bbox_targets = delta2bbox(
-                rois, bbox_targets, self.target_means, self.target_stds)
+            bbox_pred = delta2bbox(rois, bbox_pred, self.target_means,
+                                   self.target_stds)
+            bbox_targets = delta2bbox(rois, bbox_targets, self.target_means,
+                                      self.target_stds)
         loss_reg = self.loss_bbox(
             bbox_pred,
             bbox_targets,
@@ -209,16 +209,15 @@ class CascadeAnchorHead(nn.Module):
                 sampling=self.sampling)
         if cls_reg_targets is None:
             return None
-        (labels_list, label_weights_list, bbox_targets_list,
-         bbox_weights_list, rois_list, num_total_pos, num_total_neg
-         ) = cls_reg_targets
+        (labels_list, label_weights_list, bbox_targets_list, bbox_weights_list,
+         rois_list, num_total_pos, num_total_neg) = cls_reg_targets
         # num_total_samples = (num_total_pos + num_total_neg if self.sampling
         #                     else num_total_pos)
         if self.sampling:
             num_total_samples = num_total_pos + num_total_neg
         else:
-            num_total_samples = sum([label.numel() for
-                                     label in labels_list]) / 200.0
+            num_total_samples = sum([label.numel()
+                                     for label in labels_list]) / 200.0
         losses = multi_apply(
             self.loss_single,
             cls_scores,
@@ -234,7 +233,12 @@ class CascadeAnchorHead(nn.Module):
             return dict(loss_cls=losses[0], loss_reg=losses[1])
         return dict(loss_reg=losses[1])
 
-    def get_bboxes(self, anchor_list, cls_scores, bbox_preds, img_metas, cfg,
+    def get_bboxes(self,
+                   anchor_list,
+                   cls_scores,
+                   bbox_preds,
+                   img_metas,
+                   cfg,
                    rescale=False):
         assert len(cls_scores) == len(bbox_preds)
         num_levels = len(cls_scores)
@@ -264,9 +268,9 @@ class CascadeAnchorHead(nn.Module):
                 bbox_pred = bbox_preds[i][img_id].detach()
                 bbox_pred = bbox_pred.permute(1, 2, 0).reshape(-1, 4)
                 img_shape = img_metas[img_id]['img_shape']
-                bboxes = delta2bbox(
-                    anchor_list[img_id][i], bbox_pred, self.target_means,
-                    self.target_stds, img_shape)
+                bboxes = delta2bbox(anchor_list[img_id][i], bbox_pred,
+                                    self.target_means, self.target_stds,
+                                    img_shape)
                 mlvl_anchors.append(bboxes)
             new_anchor_list.append(mlvl_anchors)
         return new_anchor_list
@@ -285,8 +289,8 @@ class CascadeAnchorHead(nn.Module):
         for cls_score, bbox_pred, anchors in zip(cls_scores, bbox_preds,
                                                  mlvl_anchors):
             assert cls_score.size()[-2:] == bbox_pred.size()[-2:]
-            cls_score = cls_score.permute(1, 2, 0).reshape(
-                -1, self.cls_out_channels)
+            cls_score = cls_score.permute(1, 2,
+                                          0).reshape(-1, self.cls_out_channels)
             if self.use_sigmoid_cls:
                 scores = cls_score.sigmoid()
             else:
@@ -313,6 +317,7 @@ class CascadeAnchorHead(nn.Module):
         if self.use_sigmoid_cls:
             padding = mlvl_scores.new_zeros(mlvl_scores.shape[0], 1)
             mlvl_scores = torch.cat([padding, mlvl_scores], dim=1)
-        det_bboxes, det_labels = multiclass_nms(
-            mlvl_bboxes, mlvl_scores, cfg.score_thr, cfg.nms, cfg.max_per_img)
+        det_bboxes, det_labels = multiclass_nms(mlvl_bboxes, mlvl_scores,
+                                                cfg.score_thr, cfg.nms,
+                                                cfg.max_per_img)
         return det_bboxes, det_labels
