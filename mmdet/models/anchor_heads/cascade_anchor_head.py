@@ -3,16 +3,15 @@ from __future__ import division
 import numpy as np
 import torch
 import torch.nn as nn
-from mmcv.cnn import normal_init
 
-from mmdet.core import (AnchorGenerator, anchor_target, delta2bbox, force_fp32,
-                        multi_apply, multiclass_nms)
+from mmdet.core import (AnchorGenerator, anchor_target, delta2bbox,
+                        multi_apply, multiclass_nms, region_anchor_target)
 from ..builder import build_loss
 from ..registry import HEADS
 
 
 @HEADS.register_module
-class AnchorHead(nn.Module):
+class CascadeAnchorHead(nn.Module):
     """Anchor-based head (RPN, RetinaNet, SSD, etc.).
 
     Args:
@@ -24,8 +23,9 @@ class AnchorHead(nn.Module):
         anchor_base_sizes (Iterable): Anchor base sizes.
         target_means (Iterable): Mean values of regression targets.
         target_stds (Iterable): Std values of regression targets.
-        loss_cls (dict): Config of classification loss.
-        loss_bbox (dict): Config of localization loss.
+        use_sigmoid_cls (bool): Whether to use sigmoid loss for classification.
+            (softmax by default)
+        use_focal_loss (bool): Whether to use focal loss for classification.
     """  # noqa: W605
 
     def __init__(self,
@@ -38,13 +38,15 @@ class AnchorHead(nn.Module):
                  anchor_base_sizes=None,
                  target_means=(.0, .0, .0, .0),
                  target_stds=(1.0, 1.0, 1.0, 1.0),
+                 with_cls=True,
+                 sampling=True,
                  loss_cls=dict(
                      type='CrossEntropyLoss',
                      use_sigmoid=True,
                      loss_weight=1.0),
                  loss_bbox=dict(
                      type='SmoothL1Loss', beta=1.0 / 9.0, loss_weight=1.0)):
-        super(AnchorHead, self).__init__()
+        super(CascadeAnchorHead, self).__init__()
         self.in_channels = in_channels
         self.num_classes = num_classes
         self.feat_channels = feat_channels
@@ -55,16 +57,19 @@ class AnchorHead(nn.Module):
             anchor_strides) if anchor_base_sizes is None else anchor_base_sizes
         self.target_means = target_means
         self.target_stds = target_stds
-
+        self.with_cls = with_cls
+        self.sampling = sampling
         self.use_sigmoid_cls = loss_cls.get('use_sigmoid', False)
-        self.sampling = loss_cls['type'] not in ['FocalLoss', 'GHMC']
+        self.cls_focal_loss = loss_cls['type'] in ['FocalLoss']
         if self.use_sigmoid_cls:
             self.cls_out_channels = num_classes - 1
         else:
             self.cls_out_channels = num_classes
+        self.use_iou_reg = loss_bbox['type'] in ['IoULoss']
         self.loss_cls = build_loss(loss_cls)
         self.loss_bbox = build_loss(loss_bbox)
-        self.fp16_enabled = False
+        if self.cls_focal_loss:
+            assert not sampling
 
         self.anchor_generators = []
         for anchor_base in self.anchor_base_sizes:
@@ -72,32 +77,31 @@ class AnchorHead(nn.Module):
                 AnchorGenerator(anchor_base, anchor_scales, anchor_ratios))
 
         self.num_anchors = len(self.anchor_ratios) * len(self.anchor_scales)
-        self._init_layers()
+        if self.use_sigmoid_cls:
+            self.cls_out_channels = self.num_classes - 1
+        else:
+            self.cls_out_channels = self.num_classes
 
     def _init_layers(self):
-        self.conv_cls = nn.Conv2d(self.feat_channels,
-                                  self.num_anchors * self.cls_out_channels, 1)
-        self.conv_reg = nn.Conv2d(self.feat_channels, self.num_anchors * 4, 1)
+        raise NotImplementedError
 
     def init_weights(self):
-        normal_init(self.conv_cls, std=0.01)
-        normal_init(self.conv_reg, std=0.01)
+        raise NotImplementedError
 
-    def forward_single(self, x):
-        cls_score = self.conv_cls(x)
-        bbox_pred = self.conv_reg(x)
-        return cls_score, bbox_pred
+    def forward_single(self, x, offset):
+        raise NotImplementedError
 
-    def forward(self, feats):
-        return multi_apply(self.forward_single, feats)
+    def forward(self, feats, offset_list=None):
+        if offset_list is None:
+            offset_list = [None for _ in range(len(feats))]
+        return multi_apply(self.forward_single, feats, offset_list)
 
-    def get_anchors(self, featmap_sizes, img_metas, device='cuda'):
-        """Get anchors according to feature map sizes.
+    def init_anchors(self, featmap_sizes, img_metas):
+        """Init anchors according to feature map sizes.
 
         Args:
             featmap_sizes (list[tuple]): Multi-level feature map sizes.
             img_metas (list[dict]): Image meta info.
-            device (torch.device | str): device for returned tensors
 
         Returns:
             tuple: anchors of each image, valid flags of each image
@@ -110,7 +114,7 @@ class AnchorHead(nn.Module):
         multi_level_anchors = []
         for i in range(num_levels):
             anchors = self.anchor_generators[i].grid_anchors(
-                featmap_sizes[i], self.anchor_strides[i], device=device)
+                featmap_sizes[i], self.anchor_strides[i])
             multi_level_anchors.append(anchors)
         anchor_list = [multi_level_anchors for _ in range(num_imgs)]
 
@@ -125,35 +129,45 @@ class AnchorHead(nn.Module):
                 valid_feat_h = min(int(np.ceil(h / anchor_stride)), feat_h)
                 valid_feat_w = min(int(np.ceil(w / anchor_stride)), feat_w)
                 flags = self.anchor_generators[i].valid_flags(
-                    (feat_h, feat_w), (valid_feat_h, valid_feat_w),
-                    device=device)
+                    (feat_h, feat_w), (valid_feat_h, valid_feat_w))
                 multi_level_flags.append(flags)
             valid_flag_list.append(multi_level_flags)
 
         return anchor_list, valid_flag_list
 
-    def loss_single(self, cls_score, bbox_pred, labels, label_weights,
+    def loss_single(self, cls_score, bbox_pred, rois, labels, label_weights,
                     bbox_targets, bbox_weights, num_total_samples, cfg):
         # classification loss
-        labels = labels.reshape(-1)
-        label_weights = label_weights.reshape(-1)
-        cls_score = cls_score.permute(0, 2, 3,
-                                      1).reshape(-1, self.cls_out_channels)
-        loss_cls = self.loss_cls(
-            cls_score, labels, label_weights, avg_factor=num_total_samples)
+        if self.with_cls:
+            labels = labels.reshape(-1)
+            label_weights = label_weights.reshape(-1)
+            cls_score = cls_score.permute(0, 2, 3, 1).reshape(
+                -1, self.cls_out_channels)
+            loss_cls = self.loss_cls(
+                cls_score, labels, label_weights, avg_factor=num_total_samples)
         # regression loss
         bbox_targets = bbox_targets.reshape(-1, 4)
         bbox_weights = bbox_weights.reshape(-1, 4)
         bbox_pred = bbox_pred.permute(0, 2, 3, 1).reshape(-1, 4)
-        loss_bbox = self.loss_bbox(
+        if self.use_iou_reg:
+            # convert delta to bbox
+            rois = rois.reshape(-1, 4)
+            bbox_pred = delta2bbox(
+                rois, bbox_pred, self.target_means, self.target_stds)
+            bbox_targets = delta2bbox(
+                rois, bbox_targets, self.target_means, self.target_stds)
+        loss_reg = self.loss_bbox(
             bbox_pred,
             bbox_targets,
             bbox_weights,
             avg_factor=num_total_samples)
-        return loss_cls, loss_bbox
+        if self.with_cls:
+            return loss_cls, loss_reg
+        return None, loss_reg
 
-    @force_fp32(apply_to=('cls_scores', 'bbox_preds'))
     def loss(self,
+             anchor_list,
+             valid_flag_list,
              cls_scores,
              bbox_preds,
              gt_bboxes,
@@ -161,57 +175,70 @@ class AnchorHead(nn.Module):
              img_metas,
              cfg,
              gt_bboxes_ignore=None):
-        featmap_sizes = [featmap.size()[-2:] for featmap in cls_scores]
-        assert len(featmap_sizes) == len(self.anchor_generators)
-
-        device = cls_scores[0].device
-
-        anchor_list, valid_flag_list = self.get_anchors(
-            featmap_sizes, img_metas, device=device)
+        featmap_sizes = [featmap.size()[-2:] for featmap in bbox_preds]
         label_channels = self.cls_out_channels if self.use_sigmoid_cls else 1
-        cls_reg_targets = anchor_target(
-            anchor_list,
-            valid_flag_list,
-            gt_bboxes,
-            img_metas,
-            self.target_means,
-            self.target_stds,
-            cfg,
-            gt_bboxes_ignore_list=gt_bboxes_ignore,
-            gt_labels_list=gt_labels,
-            label_channels=label_channels,
-            sampling=self.sampling)
+        assigner_type = cfg.assigner['type']
+        if assigner_type == 'RegionAssigner':
+            cls_reg_targets = region_anchor_target(
+                anchor_list,
+                valid_flag_list,
+                gt_bboxes,
+                img_metas,
+                featmap_sizes,
+                self.anchor_scales[0],
+                self.anchor_strides,
+                self.target_means,
+                self.target_stds,
+                cfg,
+                gt_bboxes_ignore_list=gt_bboxes_ignore,
+                gt_labels_list=gt_labels,
+                label_channels=label_channels,
+                sampling=self.sampling)
+        else:
+            cls_reg_targets = anchor_target(
+                anchor_list,
+                valid_flag_list,
+                gt_bboxes,
+                img_metas,
+                self.target_means,
+                self.target_stds,
+                cfg,
+                gt_bboxes_ignore_list=gt_bboxes_ignore,
+                gt_labels_list=gt_labels,
+                label_channels=label_channels,
+                sampling=self.sampling)
         if cls_reg_targets is None:
             return None
-        (labels_list, label_weights_list, bbox_targets_list, bbox_weights_list,
-         _, num_total_pos, num_total_neg) = cls_reg_targets
-        num_total_samples = (
-            num_total_pos + num_total_neg if self.sampling else num_total_pos)
-        losses_cls, losses_bbox = multi_apply(
+        (labels_list, label_weights_list, bbox_targets_list,
+         bbox_weights_list, rois_list, num_total_pos, num_total_neg
+         ) = cls_reg_targets
+        # num_total_samples = (num_total_pos + num_total_neg if self.sampling
+        #                     else num_total_pos)
+        if self.sampling:
+            num_total_samples = num_total_pos + num_total_neg
+        else:
+            num_total_samples = sum([label.numel() for
+                                     label in labels_list]) / 200.0
+        losses = multi_apply(
             self.loss_single,
             cls_scores,
             bbox_preds,
+            rois_list,
             labels_list,
             label_weights_list,
             bbox_targets_list,
             bbox_weights_list,
             num_total_samples=num_total_samples,
             cfg=cfg)
-        return dict(loss_cls=losses_cls, loss_bbox=losses_bbox)
+        if self.with_cls:
+            return dict(loss_cls=losses[0], loss_reg=losses[1])
+        return dict(loss_reg=losses[1])
 
-    @force_fp32(apply_to=('cls_scores', 'bbox_preds'))
-    def get_bboxes(self, cls_scores, bbox_preds, img_metas, cfg,
+    def get_bboxes(self, anchor_list, cls_scores, bbox_preds, img_metas, cfg,
                    rescale=False):
         assert len(cls_scores) == len(bbox_preds)
         num_levels = len(cls_scores)
 
-        device = cls_scores[0].device
-        mlvl_anchors = [
-            self.anchor_generators[i].grid_anchors(
-                cls_scores[i].size()[-2:],
-                self.anchor_strides[i],
-                device=device) for i in range(num_levels)
-        ]
         result_list = []
         for img_id in range(len(img_metas)):
             cls_score_list = [
@@ -223,10 +250,26 @@ class AnchorHead(nn.Module):
             img_shape = img_metas[img_id]['img_shape']
             scale_factor = img_metas[img_id]['scale_factor']
             proposals = self.get_bboxes_single(cls_score_list, bbox_pred_list,
-                                               mlvl_anchors, img_shape,
+                                               anchor_list[img_id], img_shape,
                                                scale_factor, cfg, rescale)
             result_list.append(proposals)
         return result_list
+
+    def refine_bboxes(self, anchor_list, bbox_preds, img_metas):
+        num_levels = len(bbox_preds)
+        new_anchor_list = []
+        for img_id in range(len(img_metas)):
+            mlvl_anchors = []
+            for i in range(num_levels):
+                bbox_pred = bbox_preds[i][img_id].detach()
+                bbox_pred = bbox_pred.permute(1, 2, 0).reshape(-1, 4)
+                img_shape = img_metas[img_id]['img_shape']
+                bboxes = delta2bbox(
+                    anchor_list[img_id][i], bbox_pred, self.target_means,
+                    self.target_stds, img_shape)
+                mlvl_anchors.append(bboxes)
+            new_anchor_list.append(mlvl_anchors)
+        return new_anchor_list
 
     def get_bboxes_single(self,
                           cls_scores,
@@ -242,8 +285,8 @@ class AnchorHead(nn.Module):
         for cls_score, bbox_pred, anchors in zip(cls_scores, bbox_preds,
                                                  mlvl_anchors):
             assert cls_score.size()[-2:] == bbox_pred.size()[-2:]
-            cls_score = cls_score.permute(1, 2,
-                                          0).reshape(-1, self.cls_out_channels)
+            cls_score = cls_score.permute(1, 2, 0).reshape(
+                -1, self.cls_out_channels)
             if self.use_sigmoid_cls:
                 scores = cls_score.sigmoid()
             else:
@@ -270,7 +313,6 @@ class AnchorHead(nn.Module):
         if self.use_sigmoid_cls:
             padding = mlvl_scores.new_zeros(mlvl_scores.shape[0], 1)
             mlvl_scores = torch.cat([padding, mlvl_scores], dim=1)
-        det_bboxes, det_labels = multiclass_nms(mlvl_bboxes, mlvl_scores,
-                                                cfg.score_thr, cfg.nms,
-                                                cfg.max_per_img)
+        det_bboxes, det_labels = multiclass_nms(
+            mlvl_bboxes, mlvl_scores, cfg.score_thr, cfg.nms, cfg.max_per_img)
         return det_bboxes, det_labels
