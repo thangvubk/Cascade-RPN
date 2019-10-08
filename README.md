@@ -28,6 +28,45 @@ We provide the code for reproducing experiment results of Cascade RPN
 }
 ```
 
+## Benchmark
+### Region proposal performance
+| Method | Backbone | Style | Mem (GB) | Train time (s/iter) | Inf time (fps) | AR 1000 |                Download                |
+|:------:|:--------:|:-----:|:--------:|:-------------------:|:--------------:|:-------:|:--------------------------------------:|
+|   RPN  | R-50-FPN | caffe |     -    |          -          |        -       |   58.3  |                  model                 |
+|  CRPN  | R-50-FPN | caffe |     -    |          -          |        -       |   71.7  | [model](http://bit.ly/cascade_rpn_r50) |
+
+### Detection performance
+|       Method       | Backbone | Style | Mem (GB) | Train time (s/iter) | Inf time (fps) | box AP |                Download                |
+|:------------------:|:--------:|:-----:|:--------:|:-------------------:|:--------------:|:------:|:--------------------------------------:|
+| Fast RCNN baseline | R-50-FPN | caffe |     -    |          -          |        -       |  36.9  |                                        |
+|   CRPN Fast RCNN   | R-50-FPN | caffe |     -    |          -          |        -       |  40.0  |  [model](http://bit.ly/crpn_fast_r50)  |
+|     Faster RCNN    | R-50-FPN | caffe |     -    |          -          |        -       |  37.0  |                                        |
+|  CRPN Faster RCNN  | R-50-FPN | caffe |     -    |          -          |        -       |  40.5  | [model](http://bit.ly/crpn_faster_r50) |
+
+## Setup
+Please follow official [installation](https://github.com/open-mmlab/mmdetection/blob/master/docs/INSTALL.md) and [getting_started](https://github.com/open-mmlab/mmdetection/blob/master/docs/GETTING_STARTED.md) guides.
+
+##  Testing
+``./tools/dist_test.sh ${CONFIG_FILE} ${CHECKPOINT_FILE} ${GPU_NUM} [--out ${RESULT_FILE}] [--eval ${EVAL_METRICS}]``
+
+Note:
+- Config files of Cascade RPN and accompanied detectors are located in [cascade_rpn](https://github.com/thangvubk/Cascade-RPN/tree/master/configs/cascade_rpn)
+- Eval metrics are ``proposal_fast`` and ``bbox`` for region proposal and detection, respectively
+
+Example of cascade rpn eval on 8 gpus:
+
+```
+./tools/dish_test.sh configs/cascade_rpn/cascade_rpn_r50_fpn_1x.py \
+    checkpoint/cascade_rpn_r50_fpn_1x_20191008-d3e01c91.pth 8 --out \
+    results/results.pkl --eval proposal_fast
+```
+
+## Training
+``./tools/dist_train.sh ${CONFIG_FILE} ${GPU_NUM} [--validate] [other_optional_args]``
+
+Note: We train Cascade RPN and accompanied detectors with 8 GPUs and 2 img/GPU. If your configuration is different, please follow the [Linear Scaling Rule](https://github.com/thangvubk/Cascade-RPN/blob/master/docs/GETTING_STARTED.md#train-a-model).
+
 ## TODO
 - [x] Release Cascade RPN code base
-- [ ] Release pretrained models (comming soon)
+- [x] Release baseline models
+- [ ] Release more models
