@@ -10,7 +10,7 @@ We provide the code for reproducing experiment results of Cascade RPN
 ```
 @inproceedings{vu2019cascade,
   title={Cascade RPN: Delving into High-Quality Region Proposal Network with Adaptive Convolution},
-  author={Thang, Vu and Hyunjun, Jang and Trung, X. Pham and Chang D. Yoo},
+  author={Vu, Thang and Jang, Hyunjun and Pham, Trung X and Yoo, Chang D},
   booktitle={Conference on Neural Information Processing Systems (NeurIPS)},
   year={2019}
 }
@@ -23,8 +23,8 @@ We provide the code for reproducing experiment results of Cascade RPN
              Zhu, Chenchen and Cheng, Tianheng and Zhao, Qijie and Li, Buyu and
              Lu, Xin and Zhu, Rui and Wu, Yue and Dai, Jifeng and Wang, Jingdong
              and Shi, Jianping and Ouyang, Wanli and Loy, Chen Change and Lin, Dahua},
-  journal= {arXiv preprint arXiv:1906.07155},
-  year={2019}
+  journal = {arXiv preprint arXiv:1906.07155},
+  year    = {2019}
 }
 ```
 
