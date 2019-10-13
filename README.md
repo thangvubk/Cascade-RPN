@@ -36,12 +36,14 @@ We provide the code for reproducing experiment results of Cascade RPN
 |  CRPN  | R-50-FPN | caffe |     -    |          -          |        -       |   71.7  | [model](http://bit.ly/cascade_rpn_r50) |
 
 ### Detection performance
-|       Method       | Backbone | Style | Mem (GB) | Train time (s/iter) | Inf time (fps) | box AP |                Download                |
-|:------------------:|:--------:|:-----:|:--------:|:-------------------:|:--------------:|:------:|:--------------------------------------:|
-| Fast RCNN baseline | R-50-FPN | caffe |     -    |          -          |        -       |  36.9  |                                        |
-|   CRPN Fast RCNN   | R-50-FPN | caffe |     -    |          -          |        -       |  40.0  |  [model](http://bit.ly/crpn_fast_r50)  |
-|     Faster RCNN    | R-50-FPN | caffe |     -    |          -          |        -       |  37.0  |                                        |
-|  CRPN Faster RCNN  | R-50-FPN | caffe |     -    |          -          |        -       |  40.5  | [model](http://bit.ly/crpn_faster_r50) |
+|     Method    |   Proposal  | Backbone |  Style  | Schedule | Mem (GB) | Train time (s/iter) | Inf time (fps) | box AP |                   Download                   |
+|:-------------:|:-----------:|:--------:|:-------:|:--------:|:--------:|:-------------------:|:--------------:|:------:|:--------------------------------------------:|
+|   Fast R-CNN  |     RPN     | R-50-FPN |  caffe  |    1x    |    3.5   |        0.250        |      16.5      |  36.9  |                       -                      |
+|   Fast R-CNN  | Cascade RPN | R-50-FPN |  caffe  |    1x    |    3.5   |        0.250        |      16.5      |  40.0  |     [model](http://bit.ly/crpn_fast_r50)     |
+|  Faster R-CNN |     RPN     | R-50-FPN |  caffe  |    1x    |    3.8   |        0.353        |      13.6      |  37.0  |                       -                      |
+|  Faster R-CNN | Cascade RPN | R-50-FPN |  caffe  |    1x    |    4.6   |        0.561        |      11.1      |  40.5  |    [model](http://bit.ly/crpn_faster_r50)    |
+| Cascade R-CNN |     RPN     | R-50-FPN | pytorch |    1x    |    4.1   |        0.455        |      11.9      |  40.8  |                       -                      |
+| Cascade R-CNN | Cascade RPN | R-50-FPN | pytorch |    1x    |    5.2   |        0.650        |       9.6      |  41.6  | [model](http://bit.ly/crpn_cascade_rcnn_r50) |
 
 ## Setup
 Please follow official [installation](https://github.com/open-mmlab/mmdetection/blob/master/docs/INSTALL.md) and [getting_started](https://github.com/open-mmlab/mmdetection/blob/master/docs/GETTING_STARTED.md) guides.
