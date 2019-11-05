@@ -4,7 +4,7 @@
 We provide the code for reproducing experiment results of Cascade RPN
 
 - NeurIPS 2019 spotlight paper: [pdf](https://arxiv.org/abs/1909.06720).
-- This project is based on [mmdetection](https://github.com/open-mmlab/mmdetection) framework.
+- This project is based on [mmdetection](https://github.com/open-mmlab/mmdetection) framework. Main code for Cascade RPN can be traced in commit [6b9866](https://github.com/thangvubk/Cascade-RPN/commit/6b9866c9edf203282f311ec7e214514a5eab9d98).
 - If this work is helpful for your research, please cite Cascade RPN and mmdetection
 
 ```
