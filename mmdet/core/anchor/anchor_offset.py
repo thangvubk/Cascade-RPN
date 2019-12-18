@@ -20,12 +20,6 @@ def anchor_offset(anchor_list, anchor_strides, featmap_sizes):
         dilation = 1
         pad = (ks - 1) // 2
         idx = torch.arange(-pad, pad + 1, dtype=dtype, device=device)
-        xx, yy = torch.meshgrid(idx, idx)
-        xx = xx.reshape(-1)
-        yy = yy.reshape(-1)
-
-        pad = (ks - 1) // 2
-        idx = torch.arange(-pad, pad + 1, dtype=dtype, device=device)
         yy, xx = torch.meshgrid(idx, idx)  # return order matters
         xx = xx.reshape(-1)
         yy = yy.reshape(-1)
@@ -77,7 +71,7 @@ def anchor_offset(anchor_list, anchor_strides, featmap_sizes):
             offset_x = s_offset_x + c_offset_x[:, None]
             offset_y = s_offset_y + c_offset_y[:, None]
 
-            # offset order (y0, x0, y1, x0, .., y9, x8, y9, x9)
+            # offset order (y0, x0, y1, x2, .., y8, x8, y9, x9)
             offset = torch.stack([offset_y, offset_x], dim=-1)
             offset = offset.reshape(offset.size(0), -1)  # [NA, 2*ks**2]
             mlvl_offset.append(offset)

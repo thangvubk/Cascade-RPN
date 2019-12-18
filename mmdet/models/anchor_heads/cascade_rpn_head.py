@@ -52,6 +52,14 @@ class CascadeRPNHead(CascadeAnchorHead):
                  dilation=1,
                  bridged_feature=False,
                  **kwargs):
+        """CascadeRPNHead
+
+        Args:
+            in_channels (int): Number of channels in the input feature map.
+            feat_adapt (bool): Whether to use adaptive convolution.
+            dilation (int): Dilation factor of rpn_conv
+            bridged_feature (bool): Whether to use bridge feature.
+        """  # noqa: W605
         super(CascadeRPNHead, self).__init__(2, in_channels, **kwargs)
         self.feat_adapt = feat_adapt
         self.dilation = dilation

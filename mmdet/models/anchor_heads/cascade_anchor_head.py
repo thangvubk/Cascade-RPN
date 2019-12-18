@@ -23,6 +23,8 @@ class CascadeAnchorHead(nn.Module):
         anchor_base_sizes (Iterable): Anchor base sizes.
         target_means (Iterable): Mean values of regression targets.
         target_stds (Iterable): Std values of regression targets.
+        with_cls (bool): Wheather to use classification.
+        sampling (bool): Whether to use sampling during training.
         use_sigmoid_cls (bool): Whether to use sigmoid loss for classification.
             (softmax by default)
         use_focal_loss (bool): Whether to use focal loss for classification.
