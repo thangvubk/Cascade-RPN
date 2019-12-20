@@ -102,21 +102,20 @@ def images_to_levels(target, num_level_anchors):
     return level_targets
 
 
-def region_anchor_target_single(
-        anchors,
-        valid_flags,
-        gt_bboxes,
-        gt_bboxes_ignore,
-        gt_labels,
-        img_meta,
-        featmap_sizes,
-        anchor_scale,
-        anchor_strides,
-        target_means,
-        target_stds,
-        cfg,
-        label_channels=1,  # TODO: check this arg
-        sampling=True):
+def region_anchor_target_single(anchors,
+                                valid_flags,
+                                gt_bboxes,
+                                gt_bboxes_ignore,
+                                gt_labels,
+                                img_meta,
+                                featmap_sizes,
+                                anchor_scale,
+                                anchor_strides,
+                                target_means,
+                                target_stds,
+                                cfg,
+                                label_channels=1,  # TODO: check this arg
+                                sampling=True):  # yapf: disable
     bbox_assigner = build_assigner(cfg.assigner)
     assign_result = bbox_assigner.assign(
         anchors,
