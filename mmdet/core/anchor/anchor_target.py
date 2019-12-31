@@ -81,7 +81,7 @@ def anchor_target(anchor_list,
                bbox_weights_list, num_total_pos, num_total_neg)
     if get_bbox_anchor:
         bbox_anchor_list = images_to_levels(_anchor_list, num_level_anchors)
-    outputs = outputs + (bbox_anchor_list, )
+        outputs = outputs + (bbox_anchor_list, )
     return outputs
 
 
