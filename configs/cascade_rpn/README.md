@@ -1,8 +1,7 @@
 
 # Cascade RPN
 
-We provide the code for reproducing experiment results of [Cascade RPN](https://arxiv.org/abs/1909.06720)
-
+We provide the code for reproducing experiment results of [Cascade RPN](https://arxiv.org/abs/1909.06720). Questions and issues related to Cascade RPN can be discussed in [Official Repo](https://github.com/thangvubk/Cascade-RPN).
 ```
 @inproceedings{vu2019cascade,
   title={Cascade RPN: Delving into High-Quality Region Proposal Network with Adaptive Convolution},
@@ -16,7 +15,7 @@ We provide the code for reproducing experiment results of [Cascade RPN](https://
 ### Region proposal performance
 | Method | Backbone | Style | Mem (GB) | Train time (s/iter) | Inf time (fps) | AR 1000 |                Download                |
 |:------:|:--------:|:-----:|:--------:|:-------------------:|:--------------:|:-------:|:--------------------------------------:|
-|   RPN  | R-50-FPN | caffe |     -    |          -          |        -       |   58.3  |                  model                 |
+|   RPN  | R-50-FPN | caffe |     -    |          -          |        -       |   58.3  |                    -                   |
 |  CRPN  | R-50-FPN | caffe |     -    |          -          |        -       |   71.7  | [model](http://bit.ly/cascade_rpn_r50) |
 
 ### Detection performance
