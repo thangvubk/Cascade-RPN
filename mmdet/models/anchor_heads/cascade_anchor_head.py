@@ -137,8 +137,9 @@ class CascadeAnchorHead(nn.Module):
 
         return anchor_list, valid_flag_list
 
-    def loss_single(self, cls_score, bbox_pred, bbox_anchor, labels, label_weights,
-                    bbox_targets, bbox_weights, num_total_samples, cfg):
+    def loss_single(self, cls_score, bbox_pred, bbox_anchor, labels,
+                    label_weights, bbox_targets, bbox_weights,
+                    num_total_samples, cfg):
         # classification loss
         if self.with_cls:
             labels = labels.reshape(-1)
@@ -156,8 +157,8 @@ class CascadeAnchorHead(nn.Module):
             bbox_anchor = bbox_anchor.reshape(-1, 4)
             bbox_pred = delta2bbox(bbox_anchor, bbox_pred, self.target_means,
                                    self.target_stds)
-            bbox_targets = delta2bbox(bbox_anchor, bbox_targets, self.target_means,
-                                      self.target_stds)
+            bbox_targets = delta2bbox(bbox_anchor, bbox_targets,
+                                      self.target_means, self.target_stds)
         loss_reg = self.loss_bbox(
             bbox_pred,
             bbox_targets,
